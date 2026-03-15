@@ -1,0 +1,2 @@
+# Exclude Cloud Functions from Flutter build and pub publish
+functions/

@@ -43,3 +43,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase Cloud Functions (Node)
+/functions/node_modules/
+/functions/.runtimeconfig.json

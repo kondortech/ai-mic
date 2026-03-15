@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "1055509999220",
+    "project_id": "ai-mic-18768",
+    "storage_bucket": "ai-mic-18768.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1055509999220:android:f06093610d8177c570ab21",
+        "android_client_info": {
+          "package_name": "com.example.ai_mic"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1055509999220-jeis14d69u108cata0gl1ioh2jqo59t8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCBvJ9fsDdo-JWlxCMR8LcAICgtouwDIEU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1055509999220-jeis14d69u108cata0gl1ioh2jqo59t8.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1055509999220-6qqol075q01edgsjib30h4i3ppt27ce6.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.aiMic"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
