@@ -1,11 +1,217 @@
-const { onRequest } = require("firebase-functions/v2/https");
+const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
+const { initializeApp } = require("firebase-admin/app");
+const { getStorage } = require("firebase-admin/storage");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const speech = require("@google-cloud/speech");
+const logger = require("firebase-functions/logger");
+const path = require("path");
+const fs = require("fs");
+const os = require("os");
 
-exports.helloWorld = onRequest(
+initializeApp();
+
+// Storage path: recordings/{userId}/{fileName} e.g. recordings/uid/recording_<uuid>.m4a
+// Transcript path: transcripts/{userId}/recording_{uuid}.txt (same uuid, different prefix & extension)
+const RECORDINGS_PREFIX = "recordings/";
+const TRANSCRIPTS_PREFIX = "transcripts/";
+const TEMP_TRANSCODE_PREFIX = ".transcribe_temp/";
+const RECORDING_FILENAME_PREFIX = "recording_";
+const AUDIO_EXTENSIONS = [".m4a", ".mp3", ".mp4", ".wav", ".flac", ".webm"];
+// Speech-to-Text does not support M4A/MP4/AAC; we convert these to FLAC
+const NEEDS_CONVERSION = [".m4a", ".mp4"];
+
+/**
+ * Parses storage path "recordings/{userId}/recording_{uuid}.m4a" into { userId, uuid }.
+ * Returns null if path doesn't match.
+ */
+function parseRecordingsPath(objectName) {
+  if (!objectName || !objectName.startsWith(RECORDINGS_PREFIX)) return null;
+  const withoutPrefix = objectName.slice(RECORDINGS_PREFIX.length);
+  const parts = withoutPrefix.split("/");
+  if (parts.length !== 2) return null; // userId + fileName
+  const [userId, fileName] = parts;
+  const ext = path.extname(fileName).toLowerCase();
+  if (!AUDIO_EXTENSIONS.includes(ext)) return null;
+  const base = path.basename(fileName, ext);
+  if (!base.startsWith(RECORDING_FILENAME_PREFIX)) return null;
+  const uuid = base.slice(RECORDING_FILENAME_PREFIX.length);
+  if (!uuid) return null;
+  return { userId, uuid, fileName: base + ext };
+}
+
+/**
+ * Convert M4A/MP4 to FLAC using ffmpeg. Returns path to the FLAC file.
+ */
+async function convertToFlac(inputPath) {
+  const ffmpegPath = require("ffmpeg-static");
+  const ffmpeg = require("fluent-ffmpeg");
+  ffmpeg.setFfmpegPath(ffmpegPath);
+
+  const outputPath = path.join(os.tmpdir(), `transcribe_${Date.now()}.flac`);
+  await new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .toFormat("flac")
+      .audioChannels(1)
+      .audioFrequency(16000)
+      .on("end", resolve)
+      .on("error", reject)
+      .save(outputPath);
+  });
+  return outputPath;
+}
+
+
+/**
+ * Callable function: transcribe an audio recording in Storage and save the transcript.
+ * Call with { storagePath: "recordings/{userId}/recording_{uuid}.m4a" } or
+ * { fileName: "recording_{uuid}.m4a" } (uses current user's recordings folder).
+ * Requires the user to be signed in; may only transcribe files under their own recordings path.
+ */
+exports.transcribeRecording = onCall(
   {
-    // Use App Engine default SA; avoids missing Compute Engine default SA.
-    serviceAccount: "ai-mic-18768@appspot.gserviceaccount.com",
+    timeoutSeconds: 540,
+    memory: "512MiB",
   },
-  (req, res) => {
-    res.json({ message: "Hello from Firebase Cloud Functions" });
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be signed in to transcribe.");
+    }
+    const uid = request.auth.uid;
+
+    const storagePath = request.data?.storagePath ?? (request.data?.fileName ? `${RECORDINGS_PREFIX}${uid}/${request.data.fileName}` : null);
+    if (!storagePath || typeof storagePath !== "string") {
+      throw new HttpsError("invalid-argument", "Provide storagePath (e.g. recordings/USER_ID/recording_UUID.m4a) or fileName (e.g. recording_UUID.m4a).");
+    }
+
+    const filePath = storagePath.startsWith("/") ? storagePath.slice(1) : storagePath;
+    const parsed = parseRecordingsPath(filePath);
+    if (!parsed) {
+      throw new HttpsError("invalid-argument", "Path must be recordings/{userId}/recording_{uuid}.m4a (or .mp3, .wav, .flac, .webm).");
+    }
+    if (parsed.userId !== uid) {
+      throw new HttpsError("permission-denied", "You may only transcribe your own recordings.");
+    }
+
+    const bucket = getStorage().bucket();
+    const bucketName = bucket.name;
+    const { userId, uuid } = parsed;
+    const transcriptPath = `${TRANSCRIPTS_PREFIX}${userId}/${RECORDING_FILENAME_PREFIX}${uuid}.txt`;
+
+    let fileSize = 0;
+    let contentType = "";
+    try {
+      const [metadata] = await bucket.file(filePath).getMetadata();
+      fileSize = Number(metadata?.size ?? 0);
+      contentType = metadata?.contentType ?? "";
+    } catch (err) {
+      throw new HttpsError("not-found", "Recording file not found in storage.");
+    }
+
+    logger.log("transcribeRecording: starting", { filePath, userId, uuid, transcriptPath });
+
+    const ext = path.extname(filePath).toLowerCase();
+    const needsConversion = NEEDS_CONVERSION.includes(ext);
+    let audioUri = `gs://${bucketName}/${filePath}`;
+    let tempFlacPath = null;
+    let tempInputPath = null;
+
+    try {
+      if (needsConversion) {
+        tempInputPath = path.join(os.tmpdir(), `input_${uuid}${ext}`);
+        await bucket.file(filePath).download({ destination: tempInputPath });
+        tempFlacPath = await convertToFlac(tempInputPath);
+        const tempStoragePath = `${TEMP_TRANSCODE_PREFIX}${uuid}.flac`;
+        await bucket.upload(tempFlacPath, {
+          destination: tempStoragePath,
+          metadata: { contentType: "audio/flac" },
+        });
+        audioUri = `gs://${bucketName}/${tempStoragePath}`;
+      }
+
+      const speechClient = new speech.SpeechClient();
+      const isLongFile = fileSize > 10 * 1024 * 1024; // 10 MB -> use long running
+
+      const config = {
+        languageCode: "en-US",
+        enableAutomaticPunctuation: true,
+        model: "default",
+      };
+
+      if (audioUri.endsWith(".flac")) {
+        config.encoding = "FLAC";
+        config.sampleRateHertz = 16000;
+      } else if (filePath.endsWith(".wav")) {
+        config.encoding = "LINEAR16";
+        config.sampleRateHertz = 16000;
+      } else if (filePath.endsWith(".mp3")) {
+        config.encoding = "MP3";
+      } else if (filePath.endsWith(".webm")) {
+        config.encoding = "WEBM_OPUS";
+      }
+
+      const audio = { uri: audioUri };
+
+      let transcriptText = "";
+
+      if (isLongFile) {
+        const [operation] = await speechClient.longRunningRecognize({
+          config,
+          audio,
+        });
+        const [response] = await operation.promise();
+        transcriptText = (response.results || [])
+          .map((r) => (r.alternatives?.[0]?.transcript ?? ""))
+          .filter(Boolean)
+          .join("\n");
+      } else {
+        const [response] = await speechClient.recognize({
+          config,
+          audio,
+        });
+        transcriptText = (response.results || [])
+          .map((r) => (r.alternatives?.[0]?.transcript ?? ""))
+          .filter(Boolean)
+          .join("\n");
+      }
+
+      const textToSave = transcriptText.trim() || "(no speech detected)";
+
+      const transcriptFile = bucket.file(transcriptPath);
+      await transcriptFile.save(textToSave, {
+        metadata: { contentType: "text/plain; charset=utf-8" },
+      });
+
+      const fileName = parsed.fileName;
+      const docId = fileName.replace(/\./g, "_");
+      const firestore = getFirestore();
+      await firestore
+        .collection("users")
+        .doc(userId)
+        .collection("recordings")
+        .doc(docId)
+        .set(
+          { status: "transcribed", updatedAt: FieldValue.serverTimestamp() },
+          { merge: true }
+        );
+
+      logger.log("transcribeRecording: transcript saved", { transcriptPath, length: textToSave.length });
+
+      return { ok: true, transcriptPath, transcriptLength: textToSave.length };
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      logger.error("transcribeRecording: failed", { filePath, transcriptPath, error: err.message });
+      throw new HttpsError("internal", err.message || "Transcription failed.");
+    } finally {
+      if (tempFlacPath && fs.existsSync(tempFlacPath)) fs.unlinkSync(tempFlacPath);
+      if (tempInputPath && fs.existsSync(tempInputPath)) fs.unlinkSync(tempInputPath);
+      if (needsConversion) {
+        const tempStoragePath = `${TEMP_TRANSCODE_PREFIX}${uuid}.flac`;
+        try {
+          await bucket.file(tempStoragePath).delete();
+        } catch (_) {
+          // ignore
+        }
+      }
+    }
   }
 );

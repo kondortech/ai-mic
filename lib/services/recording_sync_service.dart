@@ -29,14 +29,16 @@ class RecordingSyncService {
   }) async {
     final user = currentUser;
     if (user == null) {
-      onError?.call(Exception('Not signed in'));
-      return;
+      final err = Exception('Not signed in');
+      onError?.call(err);
+      throw err;
     }
 
     final file = File(localFilePath);
     if (!await file.exists()) {
-      onError?.call(Exception('Local file not found'));
-      return;
+      final err = Exception('Local file not found');
+      onError?.call(err);
+      throw err;
     }
 
     try {
@@ -46,27 +48,42 @@ class RecordingSyncService {
           .child(user.uid)
           .child(fileName);
 
-      await ref.putFile(
-        file,
-        SettableMetadata(contentType: 'audio/mp4'),
-      );
+      // Use putData so the upload Future completes reliably (putFile can hang on some platforms).
+      await ref.putFile(file, SettableMetadata(contentType: 'audio/mp4'));
 
+      final docId = _docIdFromFileName(fileName);
       final docRef = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .collection(_userRecordingsCollection)
-          .doc(_docIdFromFileName(fileName));
+          .doc(docId);
 
       await docRef.set({
         'fileName': fileName,
         'description': description,
         'timestamp': timestamp,
         'deleted': false,
+        'status': 'recording_uploaded',
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
     } catch (e) {
-      onError?.call(e);
+      final message =
+          _isStorageBucketNotFound(e)
+              ? 'Firebase Storage bucket not found. Enable Storage in Firebase Console: '
+                  'Build → Storage → Get started. See docs/STORAGE_SETUP.md for details.'
+              : e.toString();
+      onError?.call(Exception(message));
+      throw Exception(message);
     }
+  }
+
+  /// True if the error indicates the Storage bucket does not exist (never enabled).
+  static bool _isStorageBucketNotFound(Object e) {
+    final s = e.toString().toLowerCase();
+    return s.contains('object not found') ||
+        s.contains('object_not_found') ||
+        s.contains('bucket') && s.contains('not found') ||
+        s.contains('404');
   }
 
   /// Marks the recording as deleted in Firestore. Does not delete the file in Storage.

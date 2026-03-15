@@ -18,11 +18,14 @@ class SavedRecording {
     required this.fileName,
     required this.description,
     required this.timestamp,
+    this.status,
   });
 
   final String fileName;
   final String description;
   final String timestamp;
+  /// From Firestore: e.g. `recording_uploaded`, `transcribed`.
+  final String? status;
 
   String get displayTitle =>
       description.trim().isEmpty ? formatTimestamp(timestamp) : description;

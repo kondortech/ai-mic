@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -15,7 +17,10 @@ import 'profile_page.dart';
 enum PageState { idle, recording, preview }
 
 class RecordPage extends StatefulWidget {
-  const RecordPage({super.key});
+  const RecordPage({super.key, this.onRecordingSavedToCloud});
+
+  /// Called after a recording is successfully saved to the cloud. Use to e.g. switch to saved list.
+  final VoidCallback? onRecordingSavedToCloud;
 
   @override
   State<RecordPage> createState() => _RecordPageState();
@@ -29,6 +34,7 @@ class _RecordPageState extends State<RecordPage> {
   DateTime? _currentRecordingTimestamp;
   final TextEditingController _descriptionController = TextEditingController();
   bool _isPlaying = false;
+  bool _isSubmitting = false;
   static const _uuid = Uuid();
 
   @override
@@ -133,61 +139,98 @@ class _RecordPageState extends State<RecordPage> {
     if (_currentRecordingPath == null || _currentRecordingTimestamp == null) {
       return;
     }
+    if (_isSubmitting) return;
 
     final description = _descriptionController.text.trim();
-    final appDir = await getApplicationDocumentsDirectory();
-    final recordingsDir = Directory('${appDir.path}/recordings');
-    if (!await recordingsDir.exists()) {
-      await recordingsDir.create(recursive: true);
-    }
-
+    final timestampIso = _currentRecordingTimestamp!.toIso8601String();
     final id = _uuid.v4();
     final fileName = 'recording_$id.m4a';
-    final destPath = '${recordingsDir.path}/$fileName';
-    await File(_currentRecordingPath!).copy(destPath);
 
-    final metaPath = '${appDir.path}/recordings_meta.json';
-    List<Map<String, String>> list = [];
-    final metaFile = File(metaPath);
-    if (await metaFile.exists()) {
-      final content = await metaFile.readAsString();
+    if (mounted) setState(() => _isSubmitting = true);
+
+    try {
+      // 1. Save to local storage (app documents directory + metadata)
+      String destPath;
       try {
-        final decoded = jsonDecode(content) as List<dynamic>;
-        list = decoded.map((e) => Map<String, String>.from(e as Map)).toList();
-      } catch (_) {}
-    }
-    list.add({
-      'fileName': fileName,
-      'description': description,
-      'timestamp': _currentRecordingTimestamp!.toIso8601String(),
-    });
-    await metaFile.writeAsString(
-      const JsonEncoder.withIndent('  ').convert(list),
-    );
+        final appDir = await getApplicationDocumentsDirectory();
+        final recordingsDir = Directory('${appDir.path}/recordings');
+        if (!await recordingsDir.exists()) {
+          await recordingsDir.create(recursive: true);
+        }
+        destPath = '${recordingsDir.path}/$fileName';
+        await File(_currentRecordingPath!).copy(destPath);
 
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Recording saved')));
-    }
-
-    // One-way sync: upload to Firebase Storage + Firestore metadata
-    final timestampIso = _currentRecordingTimestamp!.toIso8601String();
-    RecordingSyncService.instance.uploadRecording(
-      localFilePath: destPath,
-      fileName: fileName,
-      description: description,
-      timestamp: timestampIso,
-      onError: (e) {
+        final metaPath = '${appDir.path}/recordings_meta.json';
+        List<Map<String, String>> list = [];
+        final metaFile = File(metaPath);
+        if (await metaFile.exists()) {
+          final content = await metaFile.readAsString();
+          try {
+            final decoded = jsonDecode(content) as List<dynamic>;
+            list =
+                decoded.map((e) => Map<String, String>.from(e as Map)).toList();
+          } catch (_) {}
+        }
+        list.add({
+          'fileName': fileName,
+          'description': description,
+          'timestamp': timestampIso,
+        });
+        await metaFile.writeAsString(
+          const JsonEncoder.withIndent('  ').convert(list),
+        );
+      } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(
             context,
-          ).showSnackBar(SnackBar(content: Text('Sync failed: $e')));
+          ).showSnackBar(SnackBar(content: Text('Failed to save locally: $e')));
         }
-      },
-    );
+        return;
+      }
 
-    _discard();
+      // 2. Upload to Firebase Storage + Firestore (await so we know if it succeeded)
+      try {
+        await RecordingSyncService.instance.uploadRecording(
+          localFilePath: destPath,
+          fileName: fileName,
+          description: description,
+          timestamp: timestampIso,
+          onError: (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('Sync failed: $e')));
+            }
+          },
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Recording saved and synced to cloud'),
+            ),
+          );
+        }
+        // Trigger transcription in the background (fire-and-forget)
+        unawaited(
+          FirebaseFunctions.instance
+              .httpsCallable('transcribeRecording')
+              .call({'fileName': fileName})
+              .then((_) {}, onError: (_, __) {}),
+        );
+        if (mounted) widget.onRecordingSavedToCloud?.call();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Saved locally. Cloud sync failed: $e')),
+          );
+        }
+      }
+
+      if (mounted) _discard();
+    } finally {
+      _isSubmitting = false;
+      if (mounted) setState(() {});
+    }
   }
 
   @override
@@ -284,7 +327,7 @@ class _RecordPageState extends State<RecordPage> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               IconButton.filled(
-                onPressed: _discard,
+                onPressed: _isSubmitting ? null : _discard,
                 icon: const Icon(Icons.close),
                 style: IconButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.errorContainer,
@@ -294,8 +337,15 @@ class _RecordPageState extends State<RecordPage> {
               ),
               const SizedBox(width: 32),
               IconButton.filled(
-                onPressed: _submit,
-                icon: const Icon(Icons.check),
+                onPressed: _isSubmitting ? null : _submit,
+                icon:
+                    _isSubmitting
+                        ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                        : const Icon(Icons.check),
                 style: IconButton.styleFrom(
                   backgroundColor:
                       Theme.of(context).colorScheme.primaryContainer,

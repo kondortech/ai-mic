@@ -21,7 +21,12 @@ class _MainShellState extends State<MainShell> {
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          const RecordPage(),
+          RecordPage(
+            onRecordingSavedToCloud: () {
+              setState(() => _currentIndex = 1);
+              _savedRecordingsKey.currentState?.refresh();
+            },
+          ),
           SavedRecordingsPage(key: _savedRecordingsKey),
         ],
       ),
