@@ -1,19 +1,10 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { defineSecret, defineString } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getStorage } = require("firebase-admin/storage");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const speech = require("@google-cloud/speech");
 const logger = require("firebase-functions/logger");
-const {
-  exchangeServerAuthCode,
-  persistTokensAfterCodeExchange,
-  disconnectCalendar,
-} = require("./google_calendar");
 
-/** Same Web client ID as Flutter `kGoogleSignInWebClientId` (not secret). */
-const googleOAuthWebClientId = defineString("GOOGLE_OAUTH_WEB_CLIENT_ID", { default: "" });
-const googleOAuthClientSecret = defineSecret("GOOGLE_OAUTH_CLIENT_SECRET");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -236,57 +227,3 @@ exports.transcribeRecording = onCall(
     }
   }
 );
-
-/**
- * Connect Google Calendar: client sends serverAuthCode from Google Sign-In (Calendar scope + serverClientId).
- * Stores refresh token in users/{uid}/private/google_calendar (not readable by client).
- */
-exports.connectGoogleCalendar = onCall(
-  {
-    secrets: [googleOAuthClientSecret],
-    timeoutSeconds: 60,
-    memory: "256MiB",
-  },
-  async (request) => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Sign in required.");
-    }
-    const serverAuthCode = request.data?.serverAuthCode;
-    if (!serverAuthCode || typeof serverAuthCode !== "string") {
-      throw new HttpsError(
-        "invalid-argument",
-        "Missing serverAuthCode. Use Google Sign-In with Calendar scope and Web client ID."
-      );
-    }
-    const clientId = googleOAuthWebClientId.value().trim();
-    const clientSecret = googleOAuthClientSecret.value();
-    if (!clientId || !clientSecret) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Set GOOGLE_OAUTH_WEB_CLIENT_ID and secret GOOGLE_OAUTH_CLIENT_SECRET. See docs/CALENDAR_SETUP.md."
-      );
-    }
-    try {
-      const tokens = await exchangeServerAuthCode({
-        code: serverAuthCode,
-        clientId,
-        clientSecret,
-      });
-      const result = await persistTokensAfterCodeExchange(request.auth.uid, tokens);
-      logger.log("connectGoogleCalendar: ok", { uid: request.auth.uid });
-      return { ok: true, ...result };
-    } catch (err) {
-      logger.error("connectGoogleCalendar: failed", { error: err.message });
-      throw new HttpsError("internal", err.message || "Failed to connect Calendar.");
-    }
-  }
-);
-
-/** Remove stored Calendar tokens (user disconnects). */
-exports.disconnectGoogleCalendar = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Sign in required.");
-  }
-  await disconnectCalendar(request.auth.uid);
-  return { ok: true };
-});

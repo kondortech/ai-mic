@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -25,6 +26,9 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
   final AudioPlayer _player = AudioPlayer();
   String? _playingFileName;
   bool _loading = true;
+  Timer? _statusPollingTimer;
+  bool _pollingInProgress = false;
+  Set<String> _pendingNoteUuids = {};
 
   @override
   void initState() {
@@ -37,6 +41,7 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
 
   @override
   void dispose() {
+    _statusPollingTimer?.cancel();
     _player.dispose();
     super.dispose();
   }
@@ -84,6 +89,7 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
           _loading = false;
         });
       }
+      if (mounted) _syncPollingWithCurrentStatuses();
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -91,31 +97,144 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
           _loading = false;
         });
       }
+      if (mounted) _syncPollingWithCurrentStatuses();
     }
   }
 
   /// Fetches Firestore status for each note. Returns map noteUuid -> status.
-  Future<Map<String, String>> _fetchStatusByNoteUuid() async {
+  Future<Map<String, String>> _fetchStatusByNoteUuid({
+    Set<String>? noteUuids,
+  }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return {};
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('notes')
-          .get();
       final map = <String, String>{};
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        final status = data['status'] as String?;
-        final deleted = data['deleted'] as bool? ?? false;
-        if (status != null && !deleted) {
-          map[doc.id] = status;
+
+      // If we have a set of note Uuids, use chunked `whereIn` to reduce reads.
+      // Firestore limits `whereIn` to 10 elements.
+      final uuids = noteUuids?.where((e) => e.isNotEmpty).toList();
+      if (uuids == null) {
+        final snapshot =
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .collection('notes')
+                .get();
+        for (final doc in snapshot.docs) {
+          final data = doc.data();
+          final status = data['status'] as String?;
+          final deleted = data['deleted'] as bool? ?? false;
+          if (status != null && !deleted) {
+            map[doc.id] = status;
+          }
+        }
+        return map;
+      }
+
+      const chunkSize = 10;
+      for (var i = 0; i < uuids.length; i += chunkSize) {
+        final end =
+            (i + chunkSize > uuids.length) ? uuids.length : i + chunkSize;
+        final chunk = uuids.sublist(i, end);
+        if (chunk.isEmpty) continue;
+        final snapshot =
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .collection('notes')
+                .where(FieldPath.documentId, whereIn: chunk)
+                .get();
+        for (final doc in snapshot.docs) {
+          final data = doc.data();
+          final status = data['status'] as String?;
+          final deleted = data['deleted'] as bool? ?? false;
+          if (status != null && !deleted) {
+            map[doc.id] = status;
+          }
         }
       }
       return map;
     } catch (_) {
       return {};
+    }
+  }
+
+  void _syncPollingWithCurrentStatuses() {
+    _pendingNoteUuids =
+        _recordings
+            .where((r) => r.status != null && r.status != 'transcribed')
+            .map((r) => r.noteUuid)
+            .toSet();
+
+    // Also handle cases where status isn't present yet.
+    final missingStatus =
+        _recordings
+            .where((r) => r.status == null)
+            .map((r) => r.noteUuid)
+            .toSet();
+    _pendingNoteUuids = {..._pendingNoteUuids, ...missingStatus};
+
+    if (_pendingNoteUuids.isEmpty) {
+      _statusPollingTimer?.cancel();
+      _statusPollingTimer = null;
+      return;
+    }
+
+    _statusPollingTimer ??= Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _pollStatusesUntilTranscribed(),
+    );
+  }
+
+  Future<void> _pollStatusesUntilTranscribed() async {
+    if (!mounted) return;
+    if (_pollingInProgress) return;
+    if (_pendingNoteUuids.isEmpty) {
+      _statusPollingTimer?.cancel();
+      _statusPollingTimer = null;
+      return;
+    }
+
+    _pollingInProgress = true;
+    try {
+      final statuses = await _fetchStatusByNoteUuid(
+        noteUuids: _pendingNoteUuids,
+      );
+      if (!mounted) return;
+
+      final indexByNoteUuid = <String, int>{};
+      for (var i = 0; i < _recordings.length; i++) {
+        indexByNoteUuid[_recordings[i].noteUuid] = i;
+      }
+
+      var didUpdate = false;
+      for (final entry in statuses.entries) {
+        final noteUuid = entry.key;
+        final nextStatus = entry.value;
+        final index = indexByNoteUuid[noteUuid];
+        if (index == null) continue;
+        final current = _recordings[index].status;
+        if (current == nextStatus) continue;
+
+        final old = _recordings[index];
+        _recordings[index] = SavedRecording(
+          noteUuid: old.noteUuid,
+          localFileName: old.localFileName,
+          title: old.title,
+          timestamp: old.timestamp,
+          status: nextStatus,
+        );
+        didUpdate = true;
+      }
+
+      if (didUpdate) setState(() {});
+
+      // If everything is transcribed now, stop polling.
+      _syncPollingWithCurrentStatuses();
+    } catch (_) {
+      // Ignore transient failures; next tick will retry.
+    } finally {
+      _pollingInProgress = false;
     }
   }
 
@@ -179,8 +298,11 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
       if (mounted) {
         setState(() {
           _recordings =
-              _recordings.where((x) => x.localFileName != r.localFileName).toList();
+              _recordings
+                  .where((x) => x.localFileName != r.localFileName)
+                  .toList();
         });
+        _syncPollingWithCurrentStatuses();
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Recording deleted')));
@@ -190,9 +312,9 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
         noteUuid: r.noteUuid,
         onError: (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Sync delete failed: $e')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Sync delete failed: $e')));
           }
         },
       );
@@ -200,6 +322,7 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
       if (mounted) {
         _loadRecordings();
       }
+      if (mounted) _syncPollingWithCurrentStatuses();
     }
   }
 
@@ -219,124 +342,144 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
             icon: const Icon(Icons.person),
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const ProfilePage(),
-                ),
+                MaterialPageRoute<void>(builder: (_) => const ProfilePage()),
               );
             },
           ),
         ],
       ),
       body: SafeArea(
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : RefreshIndicator(
-                onRefresh: _loadRecordings,
-                child: _recordings.isEmpty
-                    ? ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        children: [
-                          SizedBox(
-                            height: MediaQuery.of(context).size.height * 0.5,
-                            child: const Center(child: Text('No recordings yet')),
-                          ),
-                        ],
-                      )
-                    : ListView.builder(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.all(16),
-                        itemCount: _recordings.length,
-                        itemBuilder: (context, index) {
-                    final r = _recordings[index];
-                    final isPlaying = _playingFileName == r.localFileName;
-                    final borderColor = switch (r.status) {
-                      'audio' => Colors.red,
-                      'transcribed' => Colors.orange,
-                      _ => null,
-                    };
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: borderColor != null
-                          ? RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              side: BorderSide(color: borderColor, width: 2),
-                            )
-                          : null,
-                      child: InkWell(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => RecordingPage(recording: r),
-                            ),
-                          );
-                        },
-                        borderRadius: BorderRadius.circular(12),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 12,
-                          ),
-                          child: Row(
-                          children: [
-                            IconButton(
-                              onPressed: () => _togglePlay(r),
-                              icon: Icon(
-                                isPlaying ? Icons.stop : Icons.play_arrow,
+        child:
+            _loading
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+                  onRefresh: _loadRecordings,
+                  child:
+                      _recordings.isEmpty
+                          ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              SizedBox(
+                                height:
+                                    MediaQuery.of(context).size.height * 0.5,
+                                child: const Center(
+                                  child: Text('No recordings yet'),
+                                ),
                               ),
-                              iconSize: 36,
-                            ),
-                            Expanded(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  Center(
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 8,
+                            ],
+                          )
+                          : ListView.builder(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.all(16),
+                            itemCount: _recordings.length,
+                            itemBuilder: (context, index) {
+                              final r = _recordings[index];
+                              final isPlaying =
+                                  _playingFileName == r.localFileName;
+                              final borderColor = switch (r.status) {
+                                'audio' => Colors.red,
+                                'transcribed' => Colors.orange,
+                                _ => null,
+                              };
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 12),
+                                shape:
+                                    borderColor != null
+                                        ? RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          side: BorderSide(
+                                            color: borderColor,
+                                            width: 2,
+                                          ),
+                                        )
+                                        : null,
+                                child: InkWell(
+                                  onTap: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder:
+                                            (_) => RecordingPage(recording: r),
                                       ),
-                                      child: Text(
-                                        r.displayTitle,
-                                        style:
-                                            Theme.of(
-                                              context,
-                                            ).textTheme.titleMedium,
-                                        textAlign: TextAlign.center,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                    );
+                                  },
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 12,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        IconButton(
+                                          onPressed: () => _togglePlay(r),
+                                          icon: Icon(
+                                            isPlaying
+                                                ? Icons.stop
+                                                : Icons.play_arrow,
+                                          ),
+                                          iconSize: 36,
+                                        ),
+                                        Expanded(
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              Center(
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        vertical: 8,
+                                                      ),
+                                                  child: Text(
+                                                    r.displayTitle,
+                                                    style:
+                                                        Theme.of(
+                                                          context,
+                                                        ).textTheme.titleMedium,
+                                                    textAlign: TextAlign.center,
+                                                    maxLines: 2,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                              ),
+                                              Align(
+                                                alignment:
+                                                    Alignment.centerRight,
+                                                child: Text(
+                                                  formatTimestamp(r.timestamp),
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodySmall
+                                                      ?.copyWith(
+                                                        color: Theme.of(context)
+                                                            .colorScheme
+                                                            .onSurface
+                                                            .withValues(
+                                                              alpha: 0.5,
+                                                            ),
+                                                      ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        IconButton(
+                                          onPressed: () => _deleteRecording(r),
+                                          icon: const Icon(Icons.delete),
+                                          iconSize: 28,
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                  Align(
-                                    alignment: Alignment.centerRight,
-                                    child: Text(
-                                      formatTimestamp(r.timestamp),
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall?.copyWith(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurface
-                                            .withValues(alpha: 0.5),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: () => _deleteRecording(r),
-                              icon: const Icon(Icons.delete),
-                              iconSize: 28,
-                            ),
-                          ],
-                        ),
-                        ),
-                      ),
-                    );
-                  },
+                                ),
+                              );
+                            },
+                          ),
                 ),
-              ),
       ),
     );
   }

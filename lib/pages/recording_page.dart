@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
@@ -22,25 +24,84 @@ class RecordingPage extends StatefulWidget {
 class _RecordingPageState extends State<RecordingPage> {
   final AudioPlayer _player = AudioPlayer();
   bool _isPlaying = false;
+  String? _recordStatus;
   String? _transcript;
   bool _loadingTranscript = false;
   String? _transcriptError;
 
+  Timer? _statusPollingTimer;
+  int _statusPollingAttempts = 0;
+  static const Duration _statusPollingInterval = Duration(seconds: 3);
+  static const int _maxStatusPollingAttempts = 200; // ~10 minutes
+
   @override
   void initState() {
     super.initState();
+    _recordStatus = widget.recording.status;
     _player.onPlayerComplete.listen((_) {
       if (mounted) setState(() => _isPlaying = false);
     });
-    if (widget.recording.status == 'transcribed') {
+
+    if (_recordStatus == 'transcribed') {
       _loadTranscript();
+    } else {
+      _startStatusPolling();
     }
   }
 
   @override
   void dispose() {
+    _statusPollingTimer?.cancel();
     _player.dispose();
     super.dispose();
+  }
+
+  void _startStatusPolling() {
+    // Polling is only relevant while we are waiting for the status to become 'transcribed'.
+    _statusPollingTimer?.cancel();
+    _statusPollingAttempts = 0;
+    _statusPollingTimer = Timer.periodic(_statusPollingInterval, (_) async {
+      if (!mounted) return;
+      if (_statusPollingAttempts >= _maxStatusPollingAttempts) {
+        _statusPollingTimer?.cancel();
+        return;
+      }
+
+      _statusPollingAttempts++;
+      await _pollStatusOnce();
+    });
+  }
+
+  Future<void> _pollStatusOnce() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final snap =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('notes')
+              .doc(widget.recording.noteUuid)
+              .get();
+
+      if (!mounted) return;
+
+      final nextStatus = snap.data()?['status'] as String?;
+      if (nextStatus == null) return;
+
+      if (nextStatus != _recordStatus) {
+        setState(() => _recordStatus = nextStatus);
+      }
+
+      if (nextStatus == 'transcribed') {
+        _statusPollingTimer?.cancel();
+        _statusPollingTimer = null;
+        _loadTranscript();
+      }
+    } catch (_) {
+      // Transient network issues shouldn't break the page; keep polling.
+    }
   }
 
   Future<void> _loadTranscript() async {
@@ -104,14 +165,14 @@ class _RecordingPageState extends State<RecordingPage> {
   }
 
   String get _statusLabel {
-    final s = widget.recording.status;
+    final s = _recordStatus;
     if (s == 'audio') return 'Audio uploaded';
     if (s == 'transcribed') return 'Transcribed';
     return s ?? 'Unknown';
   }
 
   Color get _statusColor {
-    final s = widget.recording.status;
+    final s = _recordStatus;
     if (s == 'audio') return Colors.red;
     if (s == 'transcribed') return Colors.orange;
     return Colors.grey;
@@ -122,10 +183,7 @@ class _RecordingPageState extends State<RecordingPage> {
     final r = widget.recording;
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          r.displayTitle,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: Text(r.displayTitle, overflow: TextOverflow.ellipsis),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: SafeArea(
@@ -143,11 +201,10 @@ class _RecordingPageState extends State<RecordingPage> {
               Text(
                 formatTimestamp(r.timestamp),
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withValues(alpha: 0.6),
-                    ),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.6),
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
@@ -157,7 +214,8 @@ class _RecordingPageState extends State<RecordingPage> {
                   iconSize: 56,
                   icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
                   style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                    backgroundColor:
+                        Theme.of(context).colorScheme.primaryContainer,
                     foregroundColor:
                         Theme.of(context).colorScheme.onPrimaryContainer,
                   ),
@@ -167,9 +225,9 @@ class _RecordingPageState extends State<RecordingPage> {
               Text(
                 _statusLabel,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: _statusColor,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  color: _statusColor,
+                  fontWeight: FontWeight.w600,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
@@ -187,14 +245,16 @@ class _RecordingPageState extends State<RecordingPage> {
                 )
               else if (_transcriptError != null)
                 Card(
-                  color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.3),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.errorContainer.withValues(alpha: 0.3),
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Text(
                       _transcriptError!,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
+                        color: Theme.of(context).colorScheme.error,
+                      ),
                     ),
                   ),
                 )
@@ -213,15 +273,14 @@ class _RecordingPageState extends State<RecordingPage> {
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Text(
-                      r.status == 'transcribed'
+                      _recordStatus == 'transcribed'
                           ? 'No transcription text.'
-                          : 'Transcription not ready yet. Refresh the list when it is.',
+                          : 'Transcription not ready yet. Polling for completion...',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withValues(alpha: 0.6),
-                          ),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurface.withValues(alpha: 0.6),
+                      ),
                     ),
                   ),
                 ),

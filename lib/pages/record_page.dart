@@ -3,20 +3,16 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 
-import '../models/recording.dart';
 import '../services/recording_sync_service.dart';
 
 import 'profile_page.dart';
-import 'recording_page.dart';
 
 enum PageState { idle, recording, preview }
 
@@ -41,13 +37,9 @@ class RecordPageState extends State<RecordPage> {
   bool _isSubmitting = false;
   static const _uuid = Uuid();
 
-  List<SavedRecording> _recentNotes = const [];
-  bool _loadingRecentNotes = false;
-
   @override
   void initState() {
     super.initState();
-    _loadRecentNotes();
   }
 
   @override
@@ -217,9 +209,6 @@ class RecordPageState extends State<RecordPage> {
           },
         );
 
-        // Refresh the inline "Recent notes" flow on the home page.
-        await _loadRecentNotes();
-
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -247,94 +236,6 @@ class RecordPageState extends State<RecordPage> {
     } finally {
       _isSubmitting = false;
       if (mounted) setState(() {});
-    }
-  }
-
-  /// Exposed for the app shell to trigger a reload if needed.
-  Future<void> refreshRecentNotes() => _loadRecentNotes();
-
-  Future<void> _loadRecentNotes() async {
-    if (!mounted) return;
-    final user = FirebaseAuth.instance.currentUser;
-
-    setState(() => _loadingRecentNotes = true);
-    try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final metaPath = '${appDir.path}/recordings_meta.json';
-      final file = File(metaPath);
-
-      if (!await file.exists()) {
-        if (!mounted) return;
-        setState(() {
-          _recentNotes = const [];
-          _loadingRecentNotes = false;
-        });
-        return;
-      }
-
-      final content = await file.readAsString();
-      final decoded = jsonDecode(content) as List<dynamic>;
-
-      final parsed = <SavedRecording>[];
-      for (final e in decoded) {
-        final map = Map<String, dynamic>.from(e as Map);
-        final noteUuid = map['noteUuid'] as String?;
-        final localFileName = map['localFileName'] as String?;
-        final title = map['title'] as String? ?? '';
-        final timestamp = map['timestamp'] as String? ?? '';
-        if (noteUuid == null || noteUuid.isEmpty) continue;
-        if (localFileName == null || localFileName.isEmpty) continue;
-        parsed.add(
-          SavedRecording(
-            noteUuid: noteUuid,
-            localFileName: localFileName,
-            title: title,
-            timestamp: timestamp,
-          ),
-        );
-      }
-
-      parsed.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      final limited = parsed.take(3).toList();
-
-      final statusByNoteUuid = <String, String>{};
-      if (user != null && limited.isNotEmpty) {
-        final snapshot = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .collection('notes')
-            .get();
-        for (final doc in snapshot.docs) {
-          final data = doc.data();
-          final status = data['status'] as String?;
-          final deleted = data['deleted'] as bool? ?? false;
-          if (status != null && !deleted) {
-            statusByNoteUuid[doc.id] = status;
-          }
-        }
-      }
-
-      final withStatus = limited.map((r) {
-        return SavedRecording(
-          noteUuid: r.noteUuid,
-          localFileName: r.localFileName,
-          title: r.title,
-          timestamp: r.timestamp,
-          status: statusByNoteUuid[r.noteUuid],
-        );
-      }).toList();
-
-      if (!mounted) return;
-      setState(() {
-        _recentNotes = withStatus;
-        _loadingRecentNotes = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _recentNotes = const [];
-        _loadingRecentNotes = false;
-      });
     }
   }
 
@@ -375,9 +276,10 @@ class RecordPageState extends State<RecordPage> {
                 iconSize: 120,
                 icon: Icon(
                   isRecording ? Icons.stop_circle : Icons.mic,
-                  color: isRecording
-                      ? Colors.red
-                      : Theme.of(context).colorScheme.primary,
+                  color:
+                      isRecording
+                          ? Colors.red
+                          : Theme.of(context).colorScheme.primary,
                 ),
                 style: IconButton.styleFrom(
                   backgroundColor: (isRecording
@@ -392,125 +294,9 @@ class RecordPageState extends State<RecordPage> {
                 isRecording ? 'Tap to stop recording' : 'Tap to record',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
-
-              const SizedBox(height: 24),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Recent notes',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              const SizedBox(height: 8),
-              _buildRecentNotesPreview(),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildRecentNotesPreview() {
-    if (_loadingRecentNotes) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
-        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-      );
-    }
-
-    if (_recentNotes.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
-        child: Text('No notes yet'),
-      );
-    }
-
-    return SizedBox(
-      height: 210,
-      child: ListView.builder(
-        itemCount: _recentNotes.length,
-        itemBuilder: (context, index) {
-          final r = _recentNotes[index];
-          final status = r.status;
-          final statusColor = status == 'audio'
-              ? Colors.red
-              : status == 'transcribed'
-                  ? Colors.orange
-                  : null;
-
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            shape: statusColor == null
-                ? null
-                : RoundedRectangleBorder(
-                    side: BorderSide(color: statusColor, width: 2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => RecordingPage(recording: r),
-                  ),
-                );
-              },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: statusColor ?? Theme.of(context).dividerColor,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            r.displayTitle,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            formatTimestamp(r.timestamp),
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurface
-                                      .withValues(alpha: 0.6),
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Icon(
-                      status == 'transcribed'
-                          ? Icons.text_fields
-                          : Icons.mic,
-                      size: 18,
-                      color: statusColor ?? Theme.of(context).iconTheme.color,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
       ),
     );
   }

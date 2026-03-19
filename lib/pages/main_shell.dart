@@ -13,7 +13,8 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
-  final GlobalKey<RecordPageState> _recordPageKey = GlobalKey<RecordPageState>();
+  final GlobalKey<RecordPageState> _recordPageKey =
+      GlobalKey<RecordPageState>();
   final GlobalKey<SavedRecordingsPageState> _savedRecordingsKey = GlobalKey();
 
   @override
@@ -25,8 +26,6 @@ class _MainShellState extends State<MainShell> {
           RecordPage(
             key: _recordPageKey,
             onRecordingSavedToCloud: () {
-              _recordPageKey.currentState?.refreshRecentNotes();
-              // Keep the flow on the main home page.
               if (_currentIndex != 0) {
                 setState(() => _currentIndex = 0);
               }

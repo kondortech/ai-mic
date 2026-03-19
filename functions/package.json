@@ -7,7 +7,7 @@
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
-    "test:calendar": "node --test test/calendar.integration.test.js"
+    "test": "node --test"
   },
   "engines": {
     "node": "20"
