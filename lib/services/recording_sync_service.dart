@@ -5,8 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
-/// One-way sync: upload new notes (audio) to Cloud Storage + Firestore.
-/// On local delete, mark the note as deleted in Firestore (soft delete).
+/// One-way sync: upload new inputs (audio) to Cloud Storage + Firestore.
+/// On local delete, mark the input as deleted in Firestore (soft delete).
 class RecordingSyncService {
   RecordingSyncService._();
   static final RecordingSyncService instance = RecordingSyncService._();
@@ -19,11 +19,11 @@ class RecordingSyncService {
     required String userId,
     required String noteUuid,
   }) {
-    // "<user_id>/notes/<note_uuid>/raw_audio.mp4"
-    return '$userId/notes/$noteUuid/raw_audio.mp4';
+    // "<user_id>/inputs/<note_uuid>/raw_audio.mp4"
+    return '$userId/inputs/$noteUuid/raw_audio.mp4';
   }
 
-  /// Uploads the note audio file to Storage and creates Firestore metadata.
+  /// Uploads the input audio file to Storage and creates Firestore metadata.
   /// Fire-and-forget: call from UI after local save; errors are silent (or surface via callback).
   Future<void> uploadNote({
     required String localFilePath,
@@ -56,11 +56,11 @@ class RecordingSyncService {
         SettableMetadata(contentType: 'audio/mp4'),
       );
 
-      // users/<user_id>/notes/<note_uuid>
+      // users/<user_id>/inputs/<note_uuid>
       final docRef = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
-          .collection('notes')
+          .collection('inputs')
           .doc(noteUuid);
 
       // Set exactly the fields required by your new schema.
@@ -92,7 +92,7 @@ class RecordingSyncService {
         s.contains('404');
   }
 
-  /// Marks the note as deleted in Firestore. Does not delete the file in Storage.
+  /// Marks the input as deleted in Firestore. Does not delete the file in Storage.
   Future<void> markNoteDeleted({
     required String noteUuid,
     void Function(Object error)? onError,
@@ -107,12 +107,12 @@ class RecordingSyncService {
       final docRef = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
-          .collection('notes')
+          .collection('inputs')
           .doc(noteUuid);
 
       final snap = await docRef.get();
       if (!snap.exists) {
-        // If the note doc doesn't exist yet (e.g. cloud upload partially failed),
+        // If the input doc doesn't exist yet (e.g. cloud upload partially failed),
         // create it with the required schema shape.
         await docRef.set({
           'title': '',

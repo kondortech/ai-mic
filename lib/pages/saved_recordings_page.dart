@@ -118,7 +118,7 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
             await FirebaseFirestore.instance
                 .collection('users')
                 .doc(user.uid)
-                .collection('notes')
+                .collection('inputs')
                 .get();
         for (final doc in snapshot.docs) {
           final data = doc.data();
@@ -141,7 +141,7 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
             await FirebaseFirestore.instance
                 .collection('users')
                 .doc(user.uid)
-                .collection('notes')
+                .collection('inputs')
                 .where(FieldPath.documentId, whereIn: chunk)
                 .get();
         for (final doc in snapshot.docs) {

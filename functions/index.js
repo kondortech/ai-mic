@@ -12,9 +12,9 @@ const os = require("os");
 
 initializeApp();
 
-// Storage path: <userId>/notes/<noteUuid>/raw_audio.mp4
-// Transcript path: <userId>/notes/<noteUuid>/raw_text.txt
-const NOTES_SEGMENT = "notes";
+// Storage path: <userId>/inputs/<noteUuid>/raw_audio.mp4
+// Transcript path: <userId>/inputs/<noteUuid>/raw_text.txt
+const INPUTS_SEGMENT = "inputs";
 const RAW_AUDIO_FILENAME = "raw_audio.mp4";
 const RAW_TEXT_FILENAME = "raw_text.txt";
 const TEMP_TRANSCODE_PREFIX = ".transcribe_temp/";
@@ -25,17 +25,17 @@ const googleOAuthWebClientId = defineString("GOOGLE_OAUTH_WEB_CLIENT_ID", { defa
 const googleOAuthClientSecret = defineSecret("GOOGLE_OAUTH_CLIENT_SECRET");
 
 /**
- * Parses storage path "<userId>/notes/<noteUuid>/raw_audio.mp4" into { userId, noteUuid }.
+ * Parses storage path "<userId>/inputs/<noteUuid>/raw_audio.mp4" into { userId, noteUuid }.
  * Returns null if path doesn't match.
  */
 function parseNotesAudioPath(objectName) {
   if (!objectName) return null;
   const parts = objectName.split("/");
-  // userId / notes / noteUuid / raw_audio.mp4
+  // userId / inputs / noteUuid / raw_audio.mp4
   if (parts.length !== 4) return null;
   const [userId, segment, noteUuid, fileName] = parts;
   if (!userId || !noteUuid) return null;
-  if (segment !== NOTES_SEGMENT) return null;
+  if (segment !== INPUTS_SEGMENT) return null;
   if (fileName !== RAW_AUDIO_FILENAME) return null;
   return { userId, noteUuid };
 }
@@ -65,7 +65,7 @@ async function convertToFlac(inputPath) {
 /**
  * Callable function: transcribe an audio recording in Storage and save the transcript.
  * Call with { noteUuid } (recommended).
- * Or call with { storagePath } pointing to "<userId>/notes/<noteUuid>/raw_audio.mp4".
+ * Or call with { storagePath } pointing to "<userId>/inputs/<noteUuid>/raw_audio.mp4".
  * Requires the user to be signed in; may only transcribe files under their own recordings path.
  */
 exports.transcribeRecording = onCall(
@@ -84,13 +84,13 @@ exports.transcribeRecording = onCall(
 
     const storagePath =
       (typeof noteUuid === "string" && noteUuid)
-        ? `${uid}/${NOTES_SEGMENT}/${noteUuid}/${RAW_AUDIO_FILENAME}`
+        ? `${uid}/${INPUTS_SEGMENT}/${noteUuid}/${RAW_AUDIO_FILENAME}`
         : storagePathFromInput;
 
     if (!storagePath || typeof storagePath !== "string") {
       throw new HttpsError(
         "invalid-argument",
-        "Provide noteUuid (recommended) or storagePath pointing to <userId>/notes/<noteUuid>/raw_audio.mp4."
+        "Provide noteUuid (recommended) or storagePath pointing to <userId>/inputs/<noteUuid>/raw_audio.mp4."
       );
     }
 
@@ -99,17 +99,17 @@ exports.transcribeRecording = onCall(
     if (!parsed) {
       throw new HttpsError(
         "invalid-argument",
-        `Path must be <userId>/${NOTES_SEGMENT}/<noteUuid>/${RAW_AUDIO_FILENAME}.`
+        `Path must be <userId>/${INPUTS_SEGMENT}/<noteUuid>/${RAW_AUDIO_FILENAME}.`
       );
     }
     if (parsed.userId !== uid) {
-      throw new HttpsError("permission-denied", "You may only transcribe your own notes.");
+      throw new HttpsError("permission-denied", "You may only transcribe your own inputs.");
     }
 
     const bucket = getStorage().bucket();
     const bucketName = bucket.name;
     const { userId, noteUuid: parsedNoteUuid } = parsed;
-    const rawTextPath = `${userId}/${NOTES_SEGMENT}/${parsedNoteUuid}/${RAW_TEXT_FILENAME}`;
+    const rawTextPath = `${userId}/${INPUTS_SEGMENT}/${parsedNoteUuid}/${RAW_TEXT_FILENAME}`;
 
     let fileSize = 0;
     let contentType = "";
@@ -199,7 +199,7 @@ exports.transcribeRecording = onCall(
       await firestore
         .collection("users")
         .doc(userId)
-        .collection("notes")
+        .collection("inputs")
         .doc(parsedNoteUuid)
         .set(
           { status: "transcribed", updatedAt: FieldValue.serverTimestamp() },

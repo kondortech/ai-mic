@@ -81,7 +81,7 @@ class _RecordingPageState extends State<RecordingPage> {
           await FirebaseFirestore.instance
               .collection('users')
               .doc(user.uid)
-              .collection('notes')
+              .collection('inputs')
               .doc(widget.recording.noteUuid)
               .get();
 
@@ -113,7 +113,7 @@ class _RecordingPageState extends State<RecordingPage> {
     });
     try {
       final transcriptPath =
-          '${user.uid}/notes/${widget.recording.noteUuid}/raw_text.txt';
+          '${user.uid}/inputs/${widget.recording.noteUuid}/raw_text.txt';
       final ref = FirebaseStorage.instance.ref().child(transcriptPath);
       final data = await ref.getData();
       if (data != null && mounted) {

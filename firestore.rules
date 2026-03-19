@@ -1,8 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // user-scoped note metadata (users/{uid}/notes/{noteUuid})
-    match /users/{userId}/notes/{noteUuid} {
+    // user-scoped input metadata (users/{uid}/inputs/{inputUuid})
+    match /users/{userId}/inputs/{inputUuid} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
