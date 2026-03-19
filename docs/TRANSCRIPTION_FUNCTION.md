@@ -4,29 +4,29 @@ The **transcribeRecording** Cloud Function is a **callable** function: you invok
 
 ## Behavior
 
-1. **Trigger**: You call the function explicitly (e.g. from the Flutter app after uploading a recording).
+1. **Trigger**: You call the function explicitly (e.g. from the Flutter app after uploading a note audio).
 2. **Input**: Pass either:
-   - **`storagePath`**: Full path in the default bucket, e.g. `recordings/{userId}/recording_{uuid}.m4a`
-   - **`fileName`**: Just the file name, e.g. `recording_{uuid}.m4a` (the function uses the current user’s `recordings/` folder).
-3. **Auth**: The user must be signed in. They may only transcribe files under their own `recordings/{userId}/` path.
+   - **`noteUuid`**: UUID of the note (recommended)
+   - **`storagePath`**: Full path to the audio file in the default bucket, e.g. `{userId}/notes/{noteUuid}/raw_audio.mp4`
+3. **Auth**: The user must be signed in. They may only transcribe files under their own `{userId}/notes/{noteUuid}/` path.
 4. **Transcription**: The audio is sent to Cloud Speech-to-Text (M4A/MP4 are converted to FLAC first).
-5. **Output**: The transcript is written to **Cloud Storage** at `transcripts/{userId}/recording_{uuid}.txt`.
+5. **Output**: The transcript is written to **Cloud Storage** at `{userId}/notes/{noteUuid}/raw_text.txt`.
 
-Example: for a recording at `recordings/abc123/recording_550e8400-e29b-41d4-a716-446655440000.m4a`, the transcript is saved at `transcripts/abc123/recording_550e8400-e29b-41d4-a716-446655440000.txt`.
+Example: for audio at `abc123/notes/550e8400-e29b-41d4-a716-446655440000/raw_audio.mp4`, the transcript is saved at `abc123/notes/550e8400-e29b-41d4-a716-446655440000/raw_text.txt`.
 
 ## Calling from Flutter
 
 ```dart
 import 'package:cloud_functions/cloud_functions.dart';
 
-// After uploading the recording (e.g. recording_<uuid>.m4a):
+// After uploading the note audio (raw_audio.mp4):
 final result = await FirebaseFunctions.instance
     .httpsCallable('transcribeRecording')
     .call<Map<String, dynamic>>({
-  'fileName': 'recording_550e8400-e29b-41d4-a716-446655440000.m4a',
-  // or 'storagePath': 'recordings/YOUR_UID/recording_550e8400-e29b-41d4-a716-446655440000.m4a',
+  'noteUuid': '550e8400-e29b-41d4-a716-446655440000',
+  // or 'storagePath': 'YOUR_UID/notes/<noteUuid>/raw_audio.mp4',
 });
-// result.data['ok'] == true, result.data['transcriptPath'], result.data['transcriptLength']
+// result.data['ok'] == true, result.data['rawTextPath'], result.data['transcriptLength']
 ```
 
 ## Requirements
@@ -51,8 +51,8 @@ firebase deploy --only functions:transcribeRecording
 
 ## Security
 
-- **Recordings**: Users can read/write only their own `recordings/{userId}/` (see `storage.rules`).
-- **Transcripts**: Users can **read** their own `transcripts/{userId}/`; only the Cloud Function (service account) can write.
+- **Notes audio**: Users can write only their own `{userId}/notes/{noteUuid}/raw_audio.mp4` (see `storage.rules`).
+- **Notes text**: Users can read their own `{userId}/notes/{noteUuid}/raw_text.txt`; only the Cloud Function (service account) can write.
 - Temp files used during M4A conversion (`.transcribe_temp/`) are not user-accessible.
 
 ## Language and limits

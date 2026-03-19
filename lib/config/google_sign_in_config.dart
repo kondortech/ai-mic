@@ -9,4 +9,3 @@
 /// Project settings → Your apps → Android app → Add fingerprint.
 /// Get SHA-1: `cd android && ./gradlew signingReport`
 const String kGoogleSignInWebClientId = '';
-// '800923383535-ki4c32t4nlmr1lnlf2hvitsdjd5acaot.apps.googleusercontent.com';

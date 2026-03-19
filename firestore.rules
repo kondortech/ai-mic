@@ -1,9 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default DB: user-scoped recording metadata (users/{uid}/recordings/{docId})
-    match /users/{userId}/recordings/{docId} {
+    // user-scoped note metadata (users/{uid}/notes/{noteUuid})
+    match /users/{userId}/notes/{noteUuid} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Calendar link status (written only by Cloud Functions). Client can read.
+    match /users/{userId}/integrations/calendar {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+    }
+
+    // OAuth tokens — only backend (Admin SDK). Client has no access.
+    match /users/{userId}/private/{document=**} {
+      allow read, write: if false;
     }
   }
 }

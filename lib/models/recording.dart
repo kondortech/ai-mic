@@ -15,18 +15,20 @@ String formatTimestamp(String iso) {
 
 class SavedRecording {
   SavedRecording({
-    required this.fileName,
-    required this.description,
+    required this.noteUuid,
+    required this.localFileName,
+    required this.title,
     required this.timestamp,
     this.status,
   });
 
-  final String fileName;
-  final String description;
+  final String noteUuid;
+  final String localFileName;
+  final String title;
   final String timestamp;
-  /// From Firestore: e.g. `recording_uploaded`, `transcribed`.
+  /// From Firestore: e.g. `audio`, `transcribed`.
   final String? status;
 
   String get displayTitle =>
-      description.trim().isEmpty ? formatTimestamp(timestamp) : description;
+      title.trim().isEmpty ? formatTimestamp(timestamp) : title;
 }

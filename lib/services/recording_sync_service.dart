@@ -5,26 +5,30 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
-/// One-way sync: upload new recordings to Cloud Storage and Firestore;
-/// on local delete, mark the recording as deleted in Firestore (soft delete).
+/// One-way sync: upload new notes (audio) to Cloud Storage + Firestore.
+/// On local delete, mark the note as deleted in Firestore (soft delete).
 class RecordingSyncService {
   RecordingSyncService._();
   static final RecordingSyncService instance = RecordingSyncService._();
-
-  static const String _recordingsStoragePath = 'recordings';
-  static const String _userRecordingsCollection = 'recordings';
 
   /// Returns the currently signed-in user. Sync only runs when the user is signed in.
   User? get currentUser =>
       Firebase.apps.isEmpty ? null : FirebaseAuth.instance.currentUser;
 
-  /// Uploads the recording file to Storage and creates/overwrites Firestore metadata.
+  static String _audioStoragePath({
+    required String userId,
+    required String noteUuid,
+  }) {
+    // "<user_id>/notes/<note_uuid>/raw_audio.mp4"
+    return '$userId/notes/$noteUuid/raw_audio.mp4';
+  }
+
+  /// Uploads the note audio file to Storage and creates Firestore metadata.
   /// Fire-and-forget: call from UI after local save; errors are silent (or surface via callback).
-  Future<void> uploadRecording({
+  Future<void> uploadNote({
     required String localFilePath,
-    required String fileName,
-    required String description,
-    required String timestamp,
+    required String noteUuid,
+    required String title,
     void Function(Object error)? onError,
   }) async {
     final user = currentUser;
@@ -44,28 +48,30 @@ class RecordingSyncService {
     try {
       final ref = FirebaseStorage.instance
           .ref()
-          .child(_recordingsStoragePath)
-          .child(user.uid)
-          .child(fileName);
+          .child(_audioStoragePath(userId: user.uid, noteUuid: noteUuid));
 
       // Use putData so the upload Future completes reliably (putFile can hang on some platforms).
-      await ref.putFile(file, SettableMetadata(contentType: 'audio/mp4'));
+      await ref.putFile(
+        file,
+        SettableMetadata(contentType: 'audio/mp4'),
+      );
 
-      final docId = _docIdFromFileName(fileName);
+      // users/<user_id>/notes/<note_uuid>
       final docRef = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
-          .collection(_userRecordingsCollection)
-          .doc(docId);
+          .collection('notes')
+          .doc(noteUuid);
 
+      // Set exactly the fields required by your new schema.
       await docRef.set({
-        'fileName': fileName,
-        'description': description,
-        'timestamp': timestamp,
-        'deleted': false,
-        'status': 'recording_uploaded',
+        'title': title,
+        // If note was created from audio.
+        'status': 'audio', // 'audio' | 'transcribed'
+        'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+        'deleted': false,
+      });
     } catch (e) {
       final message =
           _isStorageBucketNotFound(e)
@@ -77,7 +83,7 @@ class RecordingSyncService {
     }
   }
 
-  /// True if the error indicates the Storage bucket does not exist (never enabled).
+  /// True if the error indicates the Storage bucket does not exist.
   static bool _isStorageBucketNotFound(Object e) {
     final s = e.toString().toLowerCase();
     return s.contains('object not found') ||
@@ -86,9 +92,9 @@ class RecordingSyncService {
         s.contains('404');
   }
 
-  /// Marks the recording as deleted in Firestore. Does not delete the file in Storage.
-  Future<void> markRecordingDeleted({
-    required String fileName,
+  /// Marks the note as deleted in Firestore. Does not delete the file in Storage.
+  Future<void> markNoteDeleted({
+    required String noteUuid,
     void Function(Object error)? onError,
   }) async {
     final user = currentUser;
@@ -101,20 +107,28 @@ class RecordingSyncService {
       final docRef = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
-          .collection(_userRecordingsCollection)
-          .doc(_docIdFromFileName(fileName));
+          .collection('notes')
+          .doc(noteUuid);
 
-      await docRef.set({
-        'fileName': fileName,
-        'deleted': true,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final snap = await docRef.get();
+      if (!snap.exists) {
+        // If the note doc doesn't exist yet (e.g. cloud upload partially failed),
+        // create it with the required schema shape.
+        await docRef.set({
+          'title': '',
+          'status': 'audio', // 'audio' | 'transcribed'
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+          'deleted': true,
+        });
+      } else {
+        await docRef.set({
+          'deleted': true,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
     } catch (e) {
       onError?.call(e);
     }
   }
-
-  /// Firestore document IDs cannot contain '.', so we replace with '_'.
-  static String _docIdFromFileName(String fileName) =>
-      fileName.replaceAll('.', '_');
 }

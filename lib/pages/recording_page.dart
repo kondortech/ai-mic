@@ -51,8 +51,8 @@ class _RecordingPageState extends State<RecordingPage> {
       _transcriptError = null;
     });
     try {
-      final baseName = widget.recording.fileName.replaceAll(RegExp(r'\.[^.]*$'), '');
-      final transcriptPath = 'transcripts/${user.uid}/$baseName.txt';
+      final transcriptPath =
+          '${user.uid}/notes/${widget.recording.noteUuid}/raw_text.txt';
       final ref = FirebaseStorage.instance.ref().child(transcriptPath);
       final data = await ref.getData();
       if (data != null && mounted) {
@@ -81,7 +81,7 @@ class _RecordingPageState extends State<RecordingPage> {
 
   Future<String> _localPath() async {
     final appDir = await getApplicationDocumentsDirectory();
-    return '${appDir.path}/recordings/${widget.recording.fileName}';
+    return '${appDir.path}/recordings/${widget.recording.localFileName}';
   }
 
   Future<void> _togglePlay() async {
@@ -105,14 +105,14 @@ class _RecordingPageState extends State<RecordingPage> {
 
   String get _statusLabel {
     final s = widget.recording.status;
-    if (s == 'recording_uploaded') return 'Recording uploaded';
+    if (s == 'audio') return 'Audio uploaded';
     if (s == 'transcribed') return 'Transcribed';
     return s ?? 'Unknown';
   }
 
   Color get _statusColor {
     final s = widget.recording.status;
-    if (s == 'recording_uploaded') return Colors.red;
+    if (s == 'audio') return Colors.red;
     if (s == 'transcribed') return Colors.orange;
     return Colors.grey;
   }

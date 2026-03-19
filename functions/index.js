@@ -1,42 +1,49 @@
-const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret, defineString } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getStorage } = require("firebase-admin/storage");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const speech = require("@google-cloud/speech");
 const logger = require("firebase-functions/logger");
+const {
+  exchangeServerAuthCode,
+  persistTokensAfterCodeExchange,
+  disconnectCalendar,
+} = require("./google_calendar");
+
+/** Same Web client ID as Flutter `kGoogleSignInWebClientId` (not secret). */
+const googleOAuthWebClientId = defineString("GOOGLE_OAUTH_WEB_CLIENT_ID", { default: "" });
+const googleOAuthClientSecret = defineSecret("GOOGLE_OAUTH_CLIENT_SECRET");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
 initializeApp();
 
-// Storage path: recordings/{userId}/{fileName} e.g. recordings/uid/recording_<uuid>.m4a
-// Transcript path: transcripts/{userId}/recording_{uuid}.txt (same uuid, different prefix & extension)
-const RECORDINGS_PREFIX = "recordings/";
-const TRANSCRIPTS_PREFIX = "transcripts/";
+// Storage path: <userId>/notes/<noteUuid>/raw_audio.mp4
+// Transcript path: <userId>/notes/<noteUuid>/raw_text.txt
+const NOTES_SEGMENT = "notes";
+const RAW_AUDIO_FILENAME = "raw_audio.mp4";
+const RAW_TEXT_FILENAME = "raw_text.txt";
 const TEMP_TRANSCODE_PREFIX = ".transcribe_temp/";
-const RECORDING_FILENAME_PREFIX = "recording_";
 const AUDIO_EXTENSIONS = [".m4a", ".mp3", ".mp4", ".wav", ".flac", ".webm"];
 // Speech-to-Text does not support M4A/MP4/AAC; we convert these to FLAC
 const NEEDS_CONVERSION = [".m4a", ".mp4"];
 
 /**
- * Parses storage path "recordings/{userId}/recording_{uuid}.m4a" into { userId, uuid }.
+ * Parses storage path "<userId>/notes/<noteUuid>/raw_audio.mp4" into { userId, noteUuid }.
  * Returns null if path doesn't match.
  */
-function parseRecordingsPath(objectName) {
-  if (!objectName || !objectName.startsWith(RECORDINGS_PREFIX)) return null;
-  const withoutPrefix = objectName.slice(RECORDINGS_PREFIX.length);
-  const parts = withoutPrefix.split("/");
-  if (parts.length !== 2) return null; // userId + fileName
-  const [userId, fileName] = parts;
-  const ext = path.extname(fileName).toLowerCase();
-  if (!AUDIO_EXTENSIONS.includes(ext)) return null;
-  const base = path.basename(fileName, ext);
-  if (!base.startsWith(RECORDING_FILENAME_PREFIX)) return null;
-  const uuid = base.slice(RECORDING_FILENAME_PREFIX.length);
-  if (!uuid) return null;
-  return { userId, uuid, fileName: base + ext };
+function parseNotesAudioPath(objectName) {
+  if (!objectName) return null;
+  const parts = objectName.split("/");
+  // userId / notes / noteUuid / raw_audio.mp4
+  if (parts.length !== 4) return null;
+  const [userId, segment, noteUuid, fileName] = parts;
+  if (!userId || !noteUuid) return null;
+  if (segment !== NOTES_SEGMENT) return null;
+  if (fileName !== RAW_AUDIO_FILENAME) return null;
+  return { userId, noteUuid };
 }
 
 /**
@@ -63,8 +70,8 @@ async function convertToFlac(inputPath) {
 
 /**
  * Callable function: transcribe an audio recording in Storage and save the transcript.
- * Call with { storagePath: "recordings/{userId}/recording_{uuid}.m4a" } or
- * { fileName: "recording_{uuid}.m4a" } (uses current user's recordings folder).
+ * Call with { noteUuid } (recommended).
+ * Or call with { storagePath } pointing to "<userId>/notes/<noteUuid>/raw_audio.mp4".
  * Requires the user to be signed in; may only transcribe files under their own recordings path.
  */
 exports.transcribeRecording = onCall(
@@ -78,24 +85,37 @@ exports.transcribeRecording = onCall(
     }
     const uid = request.auth.uid;
 
-    const storagePath = request.data?.storagePath ?? (request.data?.fileName ? `${RECORDINGS_PREFIX}${uid}/${request.data.fileName}` : null);
+    const noteUuid = request.data?.noteUuid;
+    const storagePathFromInput = request.data?.storagePath;
+
+    const storagePath =
+      (typeof noteUuid === "string" && noteUuid)
+        ? `${uid}/${NOTES_SEGMENT}/${noteUuid}/${RAW_AUDIO_FILENAME}`
+        : storagePathFromInput;
+
     if (!storagePath || typeof storagePath !== "string") {
-      throw new HttpsError("invalid-argument", "Provide storagePath (e.g. recordings/USER_ID/recording_UUID.m4a) or fileName (e.g. recording_UUID.m4a).");
+      throw new HttpsError(
+        "invalid-argument",
+        "Provide noteUuid (recommended) or storagePath pointing to <userId>/notes/<noteUuid>/raw_audio.mp4."
+      );
     }
 
     const filePath = storagePath.startsWith("/") ? storagePath.slice(1) : storagePath;
-    const parsed = parseRecordingsPath(filePath);
+    const parsed = parseNotesAudioPath(filePath);
     if (!parsed) {
-      throw new HttpsError("invalid-argument", "Path must be recordings/{userId}/recording_{uuid}.m4a (or .mp3, .wav, .flac, .webm).");
+      throw new HttpsError(
+        "invalid-argument",
+        `Path must be <userId>/${NOTES_SEGMENT}/<noteUuid>/${RAW_AUDIO_FILENAME}.`
+      );
     }
     if (parsed.userId !== uid) {
-      throw new HttpsError("permission-denied", "You may only transcribe your own recordings.");
+      throw new HttpsError("permission-denied", "You may only transcribe your own notes.");
     }
 
     const bucket = getStorage().bucket();
     const bucketName = bucket.name;
-    const { userId, uuid } = parsed;
-    const transcriptPath = `${TRANSCRIPTS_PREFIX}${userId}/${RECORDING_FILENAME_PREFIX}${uuid}.txt`;
+    const { userId, noteUuid: parsedNoteUuid } = parsed;
+    const rawTextPath = `${userId}/${NOTES_SEGMENT}/${parsedNoteUuid}/${RAW_TEXT_FILENAME}`;
 
     let fileSize = 0;
     let contentType = "";
@@ -107,7 +127,7 @@ exports.transcribeRecording = onCall(
       throw new HttpsError("not-found", "Recording file not found in storage.");
     }
 
-    logger.log("transcribeRecording: starting", { filePath, userId, uuid, transcriptPath });
+    logger.log("transcribeRecording: starting", { filePath, userId, noteUuid: parsedNoteUuid, rawTextPath });
 
     const ext = path.extname(filePath).toLowerCase();
     const needsConversion = NEEDS_CONVERSION.includes(ext);
@@ -117,10 +137,10 @@ exports.transcribeRecording = onCall(
 
     try {
       if (needsConversion) {
-        tempInputPath = path.join(os.tmpdir(), `input_${uuid}${ext}`);
+        tempInputPath = path.join(os.tmpdir(), `input_${parsedNoteUuid}${ext}`);
         await bucket.file(filePath).download({ destination: tempInputPath });
         tempFlacPath = await convertToFlac(tempInputPath);
-        const tempStoragePath = `${TEMP_TRANSCODE_PREFIX}${uuid}.flac`;
+        const tempStoragePath = `${TEMP_TRANSCODE_PREFIX}${parsedNoteUuid}.flac`;
         await bucket.upload(tempFlacPath, {
           destination: tempStoragePath,
           metadata: { contentType: "audio/flac" },
@@ -176,42 +196,97 @@ exports.transcribeRecording = onCall(
 
       const textToSave = transcriptText.trim() || "(no speech detected)";
 
-      const transcriptFile = bucket.file(transcriptPath);
-      await transcriptFile.save(textToSave, {
+      const rawTextFile = bucket.file(rawTextPath);
+      await rawTextFile.save(textToSave, {
         metadata: { contentType: "text/plain; charset=utf-8" },
       });
 
-      const fileName = parsed.fileName;
-      const docId = fileName.replace(/\./g, "_");
       const firestore = getFirestore();
       await firestore
         .collection("users")
         .doc(userId)
-        .collection("recordings")
-        .doc(docId)
+        .collection("notes")
+        .doc(parsedNoteUuid)
         .set(
           { status: "transcribed", updatedAt: FieldValue.serverTimestamp() },
           { merge: true }
         );
 
-      logger.log("transcribeRecording: transcript saved", { transcriptPath, length: textToSave.length });
+      logger.log("transcribeRecording: raw_text saved", { rawTextPath, length: textToSave.length });
 
-      return { ok: true, transcriptPath, transcriptLength: textToSave.length };
+      return { ok: true, rawTextPath, transcriptLength: textToSave.length };
     } catch (err) {
       if (err instanceof HttpsError) throw err;
-      logger.error("transcribeRecording: failed", { filePath, transcriptPath, error: err.message });
+      logger.error("transcribeRecording: failed", { filePath, rawTextPath, error: err.message });
       throw new HttpsError("internal", err.message || "Transcription failed.");
     } finally {
       if (tempFlacPath && fs.existsSync(tempFlacPath)) fs.unlinkSync(tempFlacPath);
       if (tempInputPath && fs.existsSync(tempInputPath)) fs.unlinkSync(tempInputPath);
       if (needsConversion) {
-        const tempStoragePath = `${TEMP_TRANSCODE_PREFIX}${uuid}.flac`;
+        const tempStoragePath = `${TEMP_TRANSCODE_PREFIX}${parsedNoteUuid}.flac`;
         try {
           await bucket.file(tempStoragePath).delete();
-        } catch (_) {
-          // ignore
+        } catch (e) {
+          logger.warn("transcribeRecording: temp FLAC delete failed", {
+            tempStoragePath,
+            error: e?.message,
+          });
         }
       }
     }
   }
 );
+
+/**
+ * Connect Google Calendar: client sends serverAuthCode from Google Sign-In (Calendar scope + serverClientId).
+ * Stores refresh token in users/{uid}/private/google_calendar (not readable by client).
+ */
+exports.connectGoogleCalendar = onCall(
+  {
+    secrets: [googleOAuthClientSecret],
+    timeoutSeconds: 60,
+    memory: "256MiB",
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Sign in required.");
+    }
+    const serverAuthCode = request.data?.serverAuthCode;
+    if (!serverAuthCode || typeof serverAuthCode !== "string") {
+      throw new HttpsError(
+        "invalid-argument",
+        "Missing serverAuthCode. Use Google Sign-In with Calendar scope and Web client ID."
+      );
+    }
+    const clientId = googleOAuthWebClientId.value().trim();
+    const clientSecret = googleOAuthClientSecret.value();
+    if (!clientId || !clientSecret) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Set GOOGLE_OAUTH_WEB_CLIENT_ID and secret GOOGLE_OAUTH_CLIENT_SECRET. See docs/CALENDAR_SETUP.md."
+      );
+    }
+    try {
+      const tokens = await exchangeServerAuthCode({
+        code: serverAuthCode,
+        clientId,
+        clientSecret,
+      });
+      const result = await persistTokensAfterCodeExchange(request.auth.uid, tokens);
+      logger.log("connectGoogleCalendar: ok", { uid: request.auth.uid });
+      return { ok: true, ...result };
+    } catch (err) {
+      logger.error("connectGoogleCalendar: failed", { error: err.message });
+      throw new HttpsError("internal", err.message || "Failed to connect Calendar.");
+    }
+  }
+);
+
+/** Remove stored Calendar tokens (user disconnects). */
+exports.disconnectGoogleCalendar = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Sign in required.");
+  }
+  await disconnectCalendar(request.auth.uid);
+  return { ok: true };
+});

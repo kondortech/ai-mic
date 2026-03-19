@@ -1,6 +1,6 @@
 # Firebase Storage setup
 
-If you see **"object not found"** or **"Storage bucket not found"** when saving recordings to the cloud, the default Cloud Storage bucket has not been created yet.
+If you see **"object not found"** or **"Storage bucket not found"** when saving notes/audio to the cloud, the default Cloud Storage bucket has not been created yet.
 
 ## 1. Create the default Storage bucket
 
@@ -29,11 +29,11 @@ From the project root (where `firebase.json` lives):
 firebase deploy --only storage
 ```
 
-This deploys `storage.rules` so that only signed-in users can read/write their own `recordings/{userId}/` folder.
+This deploys `storage.rules` so that only signed-in users can read/write their own `<userId>/notes/<noteUuid>/raw_audio.mp4`.
 
 ## 3. Verify
 
 - In Firebase Console → **Storage → Files**, you should see the default bucket (no files until the app uploads).
-- Run the app, sign in, record, and save; the recording should upload and appear under `recordings/<your-uid>/`.
+- Run the app, sign in, record, and save; the note audio should upload and appear under `<your-uid>/notes/<noteUuid>/raw_audio.mp4`.
 
 If errors persist, confirm in **Storage → Files** that the bucket name matches `storageBucket` in `lib/firebase_options.dart`.

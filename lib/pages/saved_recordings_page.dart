@@ -57,18 +57,26 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
     try {
       final content = await file.readAsString();
       final decoded = jsonDecode(content) as List<dynamic>;
-      final statusByFileName = await _fetchStatusByFileName();
-      final list =
-          decoded.map((e) {
-            final map = Map<String, String>.from(e as Map);
-            final fileName = map['fileName'] ?? '';
-            return SavedRecording(
-              fileName: fileName,
-              description: map['description'] ?? '',
-              timestamp: map['timestamp'] ?? '',
-              status: statusByFileName[fileName],
-            );
-          }).toList();
+      final statusByNoteUuid = await _fetchStatusByNoteUuid();
+      final list = <SavedRecording>[];
+      for (final e in decoded) {
+        final map = Map<String, String>.from(e as Map);
+        final noteUuid = map['noteUuid'];
+        final localFileName = map['localFileName'];
+        final title = map['title'] ?? '';
+        final timestamp = map['timestamp'] ?? '';
+        if (noteUuid == null || noteUuid.isEmpty) continue;
+        if (localFileName == null || localFileName.isEmpty) continue;
+        list.add(
+          SavedRecording(
+            noteUuid: noteUuid,
+            localFileName: localFileName,
+            title: title,
+            timestamp: timestamp,
+            status: statusByNoteUuid[noteUuid],
+          ),
+        );
+      }
       list.sort((a, b) => (b.timestamp).compareTo(a.timestamp));
       if (mounted) {
         setState(() {
@@ -86,23 +94,23 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
     }
   }
 
-  /// Fetches Firestore status for each recording. Returns map fileName -> status.
-  Future<Map<String, String>> _fetchStatusByFileName() async {
+  /// Fetches Firestore status for each note. Returns map noteUuid -> status.
+  Future<Map<String, String>> _fetchStatusByNoteUuid() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return {};
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
-          .collection('recordings')
+          .collection('notes')
           .get();
       final map = <String, String>{};
       for (final doc in snapshot.docs) {
         final data = doc.data();
-        final fileName = data['fileName'] as String?;
         final status = data['status'] as String?;
-        if (fileName != null && status != null) {
-          map[fileName] = status;
+        final deleted = data['deleted'] as bool? ?? false;
+        if (status != null && !deleted) {
+          map[doc.id] = status;
         }
       }
       return map;
@@ -115,11 +123,11 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
 
   Future<String> _pathFor(SavedRecording r) async {
     final appDir = await getApplicationDocumentsDirectory();
-    return '${appDir.path}/recordings/${r.fileName}';
+    return '${appDir.path}/recordings/${r.localFileName}';
   }
 
   Future<void> _togglePlay(SavedRecording r) async {
-    if (_playingFileName == r.fileName) {
+    if (_playingFileName == r.localFileName) {
       await _player.stop();
       if (mounted) setState(() => _playingFileName = null);
       return;
@@ -135,16 +143,16 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
     }
     await _player.stop();
     await _player.play(DeviceFileSource(path));
-    if (mounted) setState(() => _playingFileName = r.fileName);
+    if (mounted) setState(() => _playingFileName = r.localFileName);
   }
 
   Future<void> _deleteRecording(SavedRecording r) async {
-    if (_playingFileName == r.fileName) {
+    if (_playingFileName == r.localFileName) {
       await _player.stop();
       if (mounted) setState(() => _playingFileName = null);
     }
     final appDir = await getApplicationDocumentsDirectory();
-    final filePath = '${appDir.path}/recordings/${r.fileName}';
+    final filePath = '${appDir.path}/recordings/${r.localFileName}';
     try {
       final file = File(filePath);
       if (await file.exists()) {
@@ -163,7 +171,7 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
       final list =
           decoded
               .map((e) => Map<String, String>.from(e as Map))
-              .where((e) => e['fileName'] != r.fileName)
+              .where((e) => e['localFileName'] != r.localFileName)
               .toList();
       await metaFile.writeAsString(
         const JsonEncoder.withIndent('  ').convert(list),
@@ -171,15 +179,15 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
       if (mounted) {
         setState(() {
           _recordings =
-              _recordings.where((x) => x.fileName != r.fileName).toList();
+              _recordings.where((x) => x.localFileName != r.localFileName).toList();
         });
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Recording deleted')));
       }
       // One-way sync: mark as deleted in Firestore (soft delete; file stays in Storage)
-      RecordingSyncService.instance.markRecordingDeleted(
-        fileName: r.fileName,
+      RecordingSyncService.instance.markNoteDeleted(
+        noteUuid: r.noteUuid,
         onError: (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -240,12 +248,12 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
                         itemCount: _recordings.length,
                         itemBuilder: (context, index) {
                     final r = _recordings[index];
-                    final isPlaying = _playingFileName == r.fileName;
-                    final borderColor = r.status == 'recording_uploaded'
-                        ? Colors.red
-                        : r.status == 'transcribed'
-                            ? Colors.orange
-                            : null;
+                    final isPlaying = _playingFileName == r.localFileName;
+                    final borderColor = switch (r.status) {
+                      'audio' => Colors.red,
+                      'transcribed' => Colors.orange,
+                      _ => null,
+                    };
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
                       shape: borderColor != null

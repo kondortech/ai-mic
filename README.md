@@ -29,10 +29,13 @@ A Flutter app for recording audio with one-way sync to Firebase (Cloud Storage +
    firebase deploy --only firestore,storage
    ```
 
+5. **Google Calendar (optional, for Cloud Functions)**  
+   See [docs/CALENDAR_SETUP.md](docs/CALENDAR_SETUP.md) — connect from **Profile**; refresh token is stored for server-side Calendar API use.
+
 Sync behavior:
 
-- **Save recording**: File is uploaded to Storage at `recordings/{userId}/{fileName}` and metadata (description, timestamp, `deleted: false`) is written to Firestore at `users/{userId}/recordings/{docId}`.
-- **Delete recording locally**: Only the local file and local metadata are removed; in Firestore the same document is updated with `deleted: true`. The file in Storage is **not** deleted (soft delete).
+- **Save note (audio)**: File is uploaded to Storage at `{userId}/notes/{noteUuid}/raw_audio.mp4` and metadata (`title`, `status: 'audio'`, `createdAt`, `updatedAt`, `deleted: false`) is written to Firestore at `users/{userId}/notes/{noteUuid}`.
+- **Delete note locally**: Only the local file and local metadata are removed; in Firestore the same document is updated with `deleted: true`. The file in Storage is **not** deleted (soft delete).
 
 ## Getting Started
 
