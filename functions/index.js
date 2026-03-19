@@ -1,4 +1,5 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret, defineString } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getStorage } = require("firebase-admin/storage");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
@@ -20,6 +21,8 @@ const TEMP_TRANSCODE_PREFIX = ".transcribe_temp/";
 const AUDIO_EXTENSIONS = [".m4a", ".mp3", ".mp4", ".wav", ".flac", ".webm"];
 // Speech-to-Text does not support M4A/MP4/AAC; we convert these to FLAC
 const NEEDS_CONVERSION = [".m4a", ".mp4"];
+const googleOAuthWebClientId = defineString("GOOGLE_OAUTH_WEB_CLIENT_ID", { default: "" });
+const googleOAuthClientSecret = defineSecret("GOOGLE_OAUTH_CLIENT_SECRET");
 
 /**
  * Parses storage path "<userId>/notes/<noteUuid>/raw_audio.mp4" into { userId, noteUuid }.
@@ -227,3 +230,136 @@ exports.transcribeRecording = onCall(
     }
   }
 );
+
+/**
+ * Connect Google Calendar and store refresh token in:
+ * users/<uid>/tokens/<google_calendar>
+ * {
+ *   type: "Google Calendar",
+ *   token: <refresh_token>,
+ *   createdAt: <timestamp>,
+ *   expired: false
+ * }
+ */
+exports.connectGoogleCalendar = onCall(
+  {
+    secrets: [googleOAuthClientSecret],
+    timeoutSeconds: 60,
+    memory: "256MiB",
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Sign in required.");
+    }
+
+    const serverAuthCode = request.data?.serverAuthCode;
+    if (!serverAuthCode || typeof serverAuthCode !== "string") {
+      throw new HttpsError("invalid-argument", "Missing serverAuthCode.");
+    }
+
+    const clientId = googleOAuthWebClientId.value().trim();
+    const clientSecret = googleOAuthClientSecret.value();
+    if (!clientId || !clientSecret) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Set GOOGLE_OAUTH_WEB_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET."
+      );
+    }
+
+    try {
+      const body = new URLSearchParams({
+        code: serverAuthCode,
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "authorization_code",
+      });
+
+      const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      });
+      const tokenJson = await tokenRes.json();
+      if (!tokenRes.ok) {
+        const msg = tokenJson.error_description || tokenJson.error || `HTTP ${tokenRes.status}`;
+        throw new Error(msg);
+      }
+
+      const refreshToken = tokenJson.refresh_token;
+      if (!refreshToken) {
+        throw new Error(
+          "No refresh token received. Revoke app access in Google Account and connect again."
+        );
+      }
+
+      await getFirestore()
+        .collection("users")
+        .doc(request.auth.uid)
+        .collection("tokens")
+        .doc("google_calendar")
+        .set({
+          type: "Google Calendar",
+          token: refreshToken,
+          createdAt: FieldValue.serverTimestamp(),
+          expired: false,
+        });
+
+      await getFirestore()
+        .collection("users")
+        .doc(request.auth.uid)
+        .collection("tokens-last-status")
+        .doc("google_calendar")
+        .set({
+          type: "Google Calendar",
+          status: "connected",
+          expired: false,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+      logger.log("connectGoogleCalendar: token stored", { uid: request.auth.uid });
+      return { ok: true };
+    } catch (err) {
+      logger.error("connectGoogleCalendar: failed", { error: err?.message });
+      throw new HttpsError("internal", err?.message || "Failed to store Calendar token.");
+    }
+  }
+);
+
+/** Mark Calendar token as disconnected and update status doc. */
+exports.disconnectGoogleCalendar = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Sign in required.");
+  }
+
+  const uid = request.auth.uid;
+  const firestore = getFirestore();
+  await firestore
+    .collection("users")
+    .doc(uid)
+    .collection("tokens")
+    .doc("google_calendar")
+    .set(
+      {
+        type: "Google Calendar",
+        expired: true,
+      },
+      { merge: true }
+    );
+
+  await firestore
+    .collection("users")
+    .doc(uid)
+    .collection("tokens-last-status")
+    .doc("google_calendar")
+    .set(
+      {
+        type: "Google Calendar",
+        status: "not connected",
+        expired: true,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+  return { ok: true };
+});

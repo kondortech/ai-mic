@@ -8,4 +8,5 @@
 /// Also add your app's SHA-1 in Firebase Console:
 /// Project settings → Your apps → Android app → Add fingerprint.
 /// Get SHA-1: `cd android && ./gradlew signingReport`
-const String kGoogleSignInWebClientId = '';
+const String kGoogleSignInWebClientId =
+    '1055509999220-jeis14d69u108cata0gl1ioh2jqo59t8.apps.googleusercontent.com';

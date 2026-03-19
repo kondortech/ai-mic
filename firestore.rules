@@ -6,13 +6,18 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Calendar link status (written only by Cloud Functions). Client can read.
-    match /users/{userId}/integrations/calendar {
+    // Calendar token status (written only by Cloud Functions). Client can read.
+    match /users/{userId}/tokens-last-status/{tokenType} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if false;
     }
 
-    // OAuth tokens — only backend (Admin SDK). Client has no access.
+    // OAuth refresh tokens — backend only.
+    match /users/{userId}/tokens/{tokenType} {
+      allow read, write: if false;
+    }
+
+    // Legacy private OAuth path — backend only.
     match /users/{userId}/private/{document=**} {
       allow read, write: if false;
     }
