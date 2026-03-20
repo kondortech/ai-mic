@@ -10,5 +10,5 @@ This directory contains Firebase Cloud Functions for the AI Mic project. It is *
 ## Layout
 
 - `index.js` — callable definitions (`onCall`); auth and wiring only
-- `business/*.js` — domain logic; request/response shapes match `generated/api.types.ts` (JSDoc)
+- `business/*.js` — domain logic; request/response types reference `generated/api.types.ts` (JSDoc)
 - `shared/*.js` — helpers (plans, calendar, transcription, Genkit)

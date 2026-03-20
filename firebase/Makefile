@@ -1,4 +1,4 @@
-.PHONY: help install-functions generate-api-types deploy-functions deploy-firestore-rules deploy-storage-rules deploy-rules deploy-all set-calendar-secret set-llm-secret set-secrets deploy-functions-with-secret
+.PHONY: help install-functions deploy-functions deploy-firestore-rules deploy-storage-rules deploy-rules deploy-all set-calendar-secret set-llm-secret set-secrets deploy-functions-with-secret
 
 # Optional: pass Firebase project from CLI, e.g.
 # make deploy-functions PROJECT=ai-mic-18768
@@ -13,7 +13,6 @@ endif
 help:
 	@echo "Available targets:"
 	@echo "  make install-functions"
-	@echo "  make generate-api-types   # openapi-typescript → functions/generated/api.types.ts (runs api/Makefile generate-ts)"
 	@echo "  make deploy-functions [PROJECT=<firebase-project-id>]"
 	@echo "  make deploy-firestore-rules [PROJECT=<firebase-project-id>]"
 	@echo "  make deploy-storage-rules [PROJECT=<firebase-project-id>]"
@@ -26,9 +25,6 @@ help:
 
 install-functions:
 	npm install --prefix functions
-
-generate-api-types:
-	$(MAKE) -C ../api generate-ts
 
 deploy-functions: install-functions
 	firebase deploy --only functions $(FIREBASE_PROJECT_FLAG)
