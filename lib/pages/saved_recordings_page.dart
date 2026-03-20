@@ -30,6 +30,48 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
   bool _pollingInProgress = false;
   Set<String> _pendingNoteUuids = {};
 
+  String _normalizeStatus(String? status) {
+    if (status == 'audio') return 'uploaded';
+    return status ?? '';
+  }
+
+  bool _isTerminalStatus(String? status) {
+    final s = _normalizeStatus(status);
+    return s == 'plan_created' || s == 'plan_executed';
+  }
+
+  bool _canDelete(SavedRecording recording) {
+    return _normalizeStatus(recording.status) != 'plan_executed';
+  }
+
+  Future<bool> _canDeleteByRemoteStatus(String noteUuid) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return false;
+    try {
+      final snap =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('inputs')
+              .doc(noteUuid)
+              .get();
+      final status = _normalizeStatus(snap.data()?['status'] as String?);
+      return status != 'plan_executed';
+    } catch (_) {
+      // Be conservative: if status cannot be checked, deny deletion.
+      return false;
+    }
+  }
+
+  Color? _statusBorderColor(String? status) {
+    final s = _normalizeStatus(status);
+    if (s == 'uploaded') return const Color.fromARGB(255, 255, 255, 255);
+    if (s == 'transcribed') return const Color.fromARGB(255, 243, 229, 193);
+    if (s == 'plan_created') return Colors.orange;
+    if (s == 'plan_executed') return Colors.green;
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -162,7 +204,7 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
   void _syncPollingWithCurrentStatuses() {
     _pendingNoteUuids =
         _recordings
-            .where((r) => r.status != null && r.status != 'transcribed')
+            .where((r) => !_isTerminalStatus(r.status))
             .map((r) => r.noteUuid)
             .toSet();
 
@@ -266,6 +308,29 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
   }
 
   Future<void> _deleteRecording(SavedRecording r) async {
+    if (!_canDelete(r)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Recording with executed plan cannot be deleted'),
+          ),
+        );
+      }
+      return;
+    }
+    final canDeleteRemote = await _canDeleteByRemoteStatus(r.noteUuid);
+    if (!canDeleteRemote) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Cannot delete this recording: plan already executed or status unavailable',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     if (_playingFileName == r.localFileName) {
       await _player.stop();
       if (mounted) setState(() => _playingFileName = null);
@@ -376,11 +441,8 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
                               final r = _recordings[index];
                               final isPlaying =
                                   _playingFileName == r.localFileName;
-                              final borderColor = switch (r.status) {
-                                'audio' => Colors.red,
-                                'transcribed' => Colors.orange,
-                                _ => null,
-                              };
+                              final borderColor = _statusBorderColor(r.status);
+                              final canDelete = _canDelete(r);
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 12),
                                 shape:
@@ -468,9 +530,16 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
                                           ),
                                         ),
                                         IconButton(
-                                          onPressed: () => _deleteRecording(r),
+                                          onPressed:
+                                              canDelete
+                                                  ? () => _deleteRecording(r)
+                                                  : null,
                                           icon: const Icon(Icons.delete),
                                           iconSize: 28,
+                                          tooltip:
+                                              canDelete
+                                                  ? 'Delete'
+                                                  : 'Cannot delete executed plan recording',
                                         ),
                                       ],
                                     ),

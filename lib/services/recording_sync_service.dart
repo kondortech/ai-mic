@@ -46,15 +46,12 @@ class RecordingSyncService {
     }
 
     try {
-      final ref = FirebaseStorage.instance
-          .ref()
-          .child(_audioStoragePath(userId: user.uid, noteUuid: noteUuid));
+      final ref = FirebaseStorage.instance.ref().child(
+        _audioStoragePath(userId: user.uid, noteUuid: noteUuid),
+      );
 
       // Use putData so the upload Future completes reliably (putFile can hang on some platforms).
-      await ref.putFile(
-        file,
-        SettableMetadata(contentType: 'audio/mp4'),
-      );
+      await ref.putFile(file, SettableMetadata(contentType: 'audio/mp4'));
 
       // users/<user_id>/inputs/<note_uuid>
       final docRef = FirebaseFirestore.instance
@@ -67,7 +64,8 @@ class RecordingSyncService {
       await docRef.set({
         'title': title,
         // If note was created from audio.
-        'status': 'audio', // 'audio' | 'transcribed'
+        'status':
+            'uploaded', // 'uploaded' | 'transcribed' | 'plan_created' | 'plan_executed'
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
         'deleted': false,
@@ -116,7 +114,8 @@ class RecordingSyncService {
         // create it with the required schema shape.
         await docRef.set({
           'title': '',
-          'status': 'audio', // 'audio' | 'transcribed'
+          'status':
+              'uploaded', // 'uploaded' | 'transcribed' | 'plan_created' | 'plan_executed'
           'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
           'deleted': true,

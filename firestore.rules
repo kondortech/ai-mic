@@ -6,6 +6,18 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
+    // Generated notes from input processing (write by backend, read by owner).
+    match /users/{userId}/notes/{noteUuid} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+    }
+
+    // Generated calendar events from input processing (write by backend, read by owner).
+    match /users/{userId}/calendar-events/{eventUuid} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+    }
+
     // Calendar token status (written only by Cloud Functions). Client can read.
     match /users/{userId}/tokens-last-status/{tokenType} {
       allow read: if request.auth != null && request.auth.uid == userId;

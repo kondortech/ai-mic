@@ -1,4 +1,4 @@
-.PHONY: help install-functions deploy-functions deploy-firestore-rules deploy-storage-rules deploy-rules deploy-all set-calendar-secret deploy-functions-with-secret
+.PHONY: help install-functions deploy-functions deploy-firestore-rules deploy-storage-rules deploy-rules deploy-all set-calendar-secret set-llm-secret set-secrets deploy-functions-with-secret
 
 # Optional: pass Firebase project from CLI, e.g.
 # make deploy-functions PROJECT=ai-mic-18768
@@ -19,6 +19,8 @@ help:
 	@echo "  make deploy-rules [PROJECT=<firebase-project-id>]"
 	@echo "  make deploy-all [PROJECT=<firebase-project-id>]"
 	@echo "  make set-calendar-secret [PROJECT=<firebase-project-id>]"
+	@echo "  make set-llm-secret [PROJECT=<firebase-project-id>]"
+	@echo "  make set-secrets [PROJECT=<firebase-project-id>]"
 	@echo "  make deploy-functions-with-secret [PROJECT=<firebase-project-id>]"
 
 install-functions:
@@ -35,7 +37,7 @@ deploy-storage-rules:
 
 deploy-rules: deploy-firestore-rules deploy-storage-rules
 
-deploy-all: set-calendar-secret deploy-functions deploy-rules
+deploy-all: set-secrets deploy-functions deploy-rules
 
 # Reads local secret from functions/.env key:
 # GOOGLE_OAUTH_CLIENT_SECRET_VALUE
@@ -50,5 +52,16 @@ set-calendar-secret:
 	fi; \
 	printf '%s' "$$secret_value" | firebase functions:secrets:set GOOGLE_OAUTH_CLIENT_SECRET --data-file - $(FIREBASE_PROJECT_FLAG)
 
+set-llm-secret:
+	@test -f functions/.env || (echo "functions/.env not found"; exit 1)
+	@secret_value=$$(sed -n 's/^[[:space:]]*GEMINI_API_KEY_VALUE[[:space:]]*=[[:space:]]*//p' functions/.env | head -n 1); \
+	if [ -z "$$secret_value" ]; then \
+		echo "GEMINI_API_KEY_VALUE is missing in functions/.env"; \
+		exit 1; \
+	fi; \
+	printf '%s' "$$secret_value" | firebase functions:secrets:set GEMINI_API_KEY --data-file - $(FIREBASE_PROJECT_FLAG)
+
+set-secrets: set-calendar-secret set-llm-secret
+
 # Helper flow: update secret first, then deploy functions.
-deploy-functions-with-secret: set-calendar-secret deploy-functions
+deploy-functions-with-secret: set-secrets deploy-functions
