@@ -3,13 +3,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 
+import '../services/api_service.dart';
 import '../services/recording_sync_service.dart';
 
 import 'profile_page.dart';
@@ -218,10 +218,7 @@ class RecordPageState extends State<RecordPage> {
         }
         // Trigger transcription in the background (fire-and-forget)
         unawaited(
-          FirebaseFunctions.instance
-              .httpsCallable('transcribeRecording')
-              .call({'noteUuid': noteUuid})
-              .then((_) {}, onError: (_, __) {}),
+          ApiService.instance.transcribeRecording(noteUuid).catchError((_) {}),
         );
         if (mounted) widget.onRecordingSavedToCloud?.call();
       } catch (e) {

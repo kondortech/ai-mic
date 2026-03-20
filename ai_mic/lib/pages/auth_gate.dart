@@ -6,14 +6,16 @@ import 'main_shell.dart';
 import 'sign_in_page.dart';
 
 /// Shows [SignInPage] when no user is signed in, [MainShell] when signed in.
-/// If Firebase is not initialized (e.g. missing config), shows [MainShell] so the app works locally.
+/// If Firebase is not initialized (e.g. missing config), throws an error.
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
 
   @override
   Widget build(BuildContext context) {
     if (Firebase.apps.isEmpty) {
-      return const MainShell();
+      throw StateError(
+        'Firebase not initialized. Please ensure proper configuration.',
+      );
     }
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),

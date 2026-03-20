@@ -1,0 +1,246 @@
+openapi: 3.0.3
+info:
+  title: AI Mic Firebase Cloud Functions API
+  description: |
+    Type-safe API specification for Firebase callable functions.
+    Each path represents a callable function name.
+  version: 1.0.0
+
+paths:
+  /transcribeRecording:
+    post:
+      summary: Transcribe audio recording
+      description: |
+        Transcribe an audio recording in Storage and save the transcript.
+        Call with noteUuid (recommended) or storagePath.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranscribeRecordingRequest'
+      responses:
+        '200':
+          description: Transcription completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranscribeRecordingResponse'
+
+  /connectGoogleCalendar:
+    post:
+      summary: Connect Google Calendar
+      description: Exchange server auth code for refresh token and store it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectGoogleCalendarRequest'
+      responses:
+        '200':
+          description: Calendar connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectGoogleCalendarResponse'
+
+  /disconnectGoogleCalendar:
+    post:
+      summary: Disconnect Google Calendar
+      description: Mark Calendar token as disconnected.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisconnectGoogleCalendarRequest'
+      responses:
+        '200':
+          description: Calendar disconnected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisconnectGoogleCalendarResponse'
+
+  /overwriteExecutionPlan:
+    post:
+      summary: Overwrite execution plan
+      description: Save a custom plan for an input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OverwriteExecutionPlanRequest'
+      responses:
+        '200':
+          description: Plan saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OverwriteExecutionPlanResponse'
+
+  /executeStoredPlan:
+    post:
+      summary: Execute stored plan
+      description: Load and execute the plan for an input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteStoredPlanRequest'
+      responses:
+        '200':
+          description: Plan execution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecuteStoredPlanResponse'
+
+components:
+  schemas:
+    TranscribeRecordingRequest:
+      type: object
+      description: |
+        Provide noteUuid (recommended) or storagePath.
+        Path must be <userId>/inputs/<noteUuid>/raw_audio.mp4
+      properties:
+        noteUuid:
+          type: string
+          description: Note UUID (recommended)
+        storagePath:
+          type: string
+          description: Full storage path alternative
+
+    TranscribeRecordingResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+        rawTextPath:
+          type: string
+          description: Storage path to raw transcript text
+        planPath:
+          type: string
+          description: Storage path to plan.json
+        transcriptLength:
+          type: integer
+          description: Length of transcript text
+
+    ConnectGoogleCalendarRequest:
+      type: object
+      required: [serverAuthCode]
+      properties:
+        serverAuthCode:
+          type: string
+          description: OAuth server auth code from Google Sign-In
+
+    ConnectGoogleCalendarResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+
+    DisconnectGoogleCalendarRequest:
+      type: object
+      description: Empty body for disconnect
+      additionalProperties: false
+
+    DisconnectGoogleCalendarResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+
+    OverwriteExecutionPlanRequest:
+      type: object
+      required: [inputUuid, plan]
+      properties:
+        inputUuid:
+          type: string
+        plan:
+          $ref: '#/components/schemas/ExecutionPlan'
+
+    OverwriteExecutionPlanResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+        planPath:
+          type: string
+        actionsCount:
+          type: integer
+
+    ExecuteStoredPlanRequest:
+      type: object
+      required: [inputUuid]
+      properties:
+        inputUuid:
+          type: string
+
+    ExecuteStoredPlanResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+        executed:
+          type: boolean
+          description: Whether any actions were executed
+        reason:
+          type: string
+          description: Reason when executed is false
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionResult'
+
+    ExecutionPlan:
+      type: object
+      required: [actions, generated_at]
+      properties:
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanAction'
+        empty_reason:
+          type: string
+          nullable: true
+          description: Required when actions is empty
+        generated_at:
+          type: string
+          format: date-time
+
+    PlanAction:
+      type: object
+      required: [tool]
+      properties:
+        tool:
+          type: string
+          description: create_note or create_calendar_event
+        arguments:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+
+    ExecutionResult:
+      type: object
+      required: [tool, ok, details]
+      properties:
+        tool:
+          type: string
+        ok:
+          type: boolean
+        details:
+          type: string

@@ -1,8 +1,8 @@
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../config/google_sign_in_config.dart';
+import 'api_service.dart';
 
 class GoogleCalendarConnectService {
   GoogleCalendarConnectService._();
@@ -47,9 +47,7 @@ class GoogleCalendarConnectService {
     }
 
     try {
-      await FirebaseFunctions.instance
-          .httpsCallable('connectGoogleCalendar')
-          .call<Map<String, dynamic>>({'serverAuthCode': code});
+      await ApiService.instance.connectGoogleCalendar(code);
     } catch (e) {
       onError?.call(e);
       rethrow;
@@ -60,9 +58,7 @@ class GoogleCalendarConnectService {
     void Function(Object error)? onError,
   }) async {
     try {
-      await FirebaseFunctions.instance
-          .httpsCallable('disconnectGoogleCalendar')
-          .call();
+      await ApiService.instance.disconnectGoogleCalendar();
     } catch (e) {
       onError?.call(e);
       rethrow;

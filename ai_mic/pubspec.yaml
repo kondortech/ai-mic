@@ -31,6 +31,9 @@ dependencies:
   flutter:
     sdk: flutter
 
+  ai_mic_api:
+    path: ../generated/dart
+
   cupertino_icons: ^1.0.8
   record: ^6.0.0
   audioplayers: ^6.0.0

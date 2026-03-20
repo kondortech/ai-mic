@@ -4,13 +4,14 @@ import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/recording.dart';
+import '../services/api_models.dart';
+import '../services/api_service.dart';
 
 /// Detail page for a single recording: name, timestamp, play/stop, status, transcription.
 class RecordingPage extends StatefulWidget {
@@ -279,39 +280,45 @@ class _RecordingPageState extends State<RecordingPage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final plan = {
-      'actions': _planActions,
-      'empty_reason':
-          _planActions.isEmpty
-              ? (_planEmptyReason ?? 'No actions in plan.')
-              : null,
-      'generated_at': DateTime.now().toIso8601String(),
-    };
+    final actions =
+        _planActions
+            .map(
+              (a) => PlanActionInput(
+                tool: (a['tool'] as String?) ?? 'create_note',
+                arguments:
+                    (a['arguments'] as Map<String, dynamic>?)?.map(
+                      (k, v) => MapEntry(k, v?.toString() ?? ''),
+                    ) ??
+                    {},
+              ),
+            )
+            .toList();
+    final plan = ExecutionPlanInput(
+      actions: actions,
+      emptyReason:
+          actions.isEmpty ? (_planEmptyReason ?? 'No actions in plan.') : null,
+      generatedAt: DateTime.now().toIso8601String(),
+    );
 
     setState(() => _executingPlan = true);
     try {
-      await FirebaseFunctions.instance
-          .httpsCallable('overwriteExecutionPlan')
-          .call({'inputUuid': widget.recording.noteUuid, 'plan': plan});
+      await ApiService.instance.overwriteExecutionPlan(
+        inputUuid: widget.recording.noteUuid,
+        plan: plan,
+      );
 
-      final res = await FirebaseFunctions.instance
-          .httpsCallable('executeStoredPlan')
-          .call({'inputUuid': widget.recording.noteUuid});
+      final result = await ApiService.instance.executeStoredPlan(
+        widget.recording.noteUuid,
+      );
 
       await _pollStatusOnce();
 
       if (mounted) {
-        final data =
-            (res.data is Map)
-                ? Map<String, dynamic>.from(res.data as Map)
-                : <String, dynamic>{};
-        final executed = data['executed'] == true;
-        final reason = data['reason']?.toString();
         final message =
-            executed
+            result.executed
                 ? 'Plan executed successfully'
-                : (reason != null && reason.isNotEmpty
-                    ? reason
+                : (result.reason != null && result.reason!.isNotEmpty
+                    ? result.reason!
                     : 'Plan has no actions');
         ScaffoldMessenger.of(
           context,

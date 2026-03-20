@@ -1,56 +1,80 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-.DS_Store
+# --- Project-specific ---
+# Generated API artifacts (repo root only; Cloud Functions TS lives under firebase/functions/generated/)
+/generated/
+
+# Local agent / tooling (keep out of VCS unless you intend to share)
 .agents/
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
 
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
+# --- Environment & secrets (never commit) ---
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.p12
+*.key
+secrets/
+
+# --- OS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Editors & IDEs ---
+# VS Code: not ignored by default so you can commit shared settings (e.g. settings.json).
+# Uncomment the next line to ignore the whole folder (local-only workspace config).
+# .vscode/
+
 .idea/
+*.iml
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+.project
+.classpath
+.settings/
+*.swp
+*.swo
+*~
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-.vscode/
+# --- Logs & temp ---
+*.log
+logs/
+tmp/
+temp/
+.cache/
+*.tmp
+*.temp
+*.bak
+*.orig
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
+# --- Node (if used at repo root or stray installs) ---
+node_modules/
 
-# Cloud Functions local env (GOOGLE_OAUTH_WEB_CLIENT_ID, etc.)
-functions/.env
+# --- Coverage & test artifacts ---
+coverage/
+.nyc_output/
+*.lcov
 
-# Symbolication related
-app.*.symbols
+# --- Build outputs (generic) ---
+dist/
+build/
+out/
 
-# Obfuscation related
-app.*.map.json
+# --- Python (if any scripts/tools) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.Python
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# --- Misc tooling ---
+.turbo/
+.vercel/
 
-# Firebase Cloud Functions (Node)
-/functions/node_modules/
-/functions/.runtimeconfig.json
+# vscode
 
-# Cursor skills
-skills-lock.json
+.vscode/*

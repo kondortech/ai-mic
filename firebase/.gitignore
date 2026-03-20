@@ -1,0 +1,17 @@
+# Firebase local state and logs
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+database-debug.log*
+pubsub-debug.log*
+ui-debug.log*
+
+# Emulator exports/imports
+firebase-export/
+firebase-emulator-data/
+
+# Cloud Functions local dependencies and env
+functions/node_modules/
+functions/.env
+functions/.env.*
+!functions/.env.example

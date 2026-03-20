@@ -1,0 +1,8 @@
+# Ignore API client - we only need models for typed request/response
+lib/api/
+# Ignore tests and docs
+test/
+doc/
+README.md
+.gitignore
+pubspec.lock
