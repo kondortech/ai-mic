@@ -78,3 +78,4 @@ venv/
 # vscode
 
 .vscode/*
+skills-lock.json
