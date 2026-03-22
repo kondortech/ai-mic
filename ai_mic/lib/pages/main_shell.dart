@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../models/recording.dart';
 import 'record_page.dart';
+import 'recording_page.dart';
 import 'saved_recordings_page.dart';
 
 /// Bottom nav shell with Record and Saved Recordings pages.
@@ -17,6 +19,22 @@ class _MainShellState extends State<MainShell> {
       GlobalKey<RecordPageState>();
   final GlobalKey<SavedRecordingsPageState> _savedRecordingsKey = GlobalKey();
 
+  void _onRecordingSaved(String noteUuid) {
+    setState(() => _currentIndex = 1);
+    _savedRecordingsKey.currentState?.refresh();
+    final recording = SavedRecording(
+      noteUuid: noteUuid,
+      title: '',
+      timestamp: DateTime.now().toIso8601String(),
+      status: 'uploaded',
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => RecordingPage(recording: recording),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -25,11 +43,7 @@ class _MainShellState extends State<MainShell> {
         children: [
           RecordPage(
             key: _recordPageKey,
-            onRecordingSavedToCloud: () {
-              if (_currentIndex != 0) {
-                setState(() => _currentIndex = 0);
-              }
-            },
+            onRecordingSavedToCloud: _onRecordingSaved,
           ),
           SavedRecordingsPage(key: _savedRecordingsKey),
         ],

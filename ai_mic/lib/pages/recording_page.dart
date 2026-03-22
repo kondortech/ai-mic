@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:ai_mic_api/api.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -8,7 +7,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../models/recording.dart';
 import '../services/api_service.dart';
@@ -59,12 +57,14 @@ class _RecordingPageState extends State<RecordingPage> {
 
     if (_normalizeStatus(_recordStatus) == 'plan_created' ||
         _normalizeStatus(_recordStatus) == 'plan_executed' ||
+        _normalizeStatus(_recordStatus) == 'no_plan_created' ||
         _normalizeStatus(_recordStatus) == 'transcribed') {
       _loadTranscript();
       _loadPlan();
     }
     if (_normalizeStatus(_recordStatus) != 'plan_created' &&
-        _normalizeStatus(_recordStatus) != 'plan_executed') {
+        _normalizeStatus(_recordStatus) != 'plan_executed' &&
+        _normalizeStatus(_recordStatus) != 'no_plan_created') {
       _startStatusPolling();
     }
   }
@@ -118,7 +118,9 @@ class _RecordingPageState extends State<RecordingPage> {
         _loadTranscript();
         _loadPlan();
       }
-      if (nextStatus == 'plan_created' || nextStatus == 'plan_executed') {
+      if (nextStatus == 'plan_created' ||
+          nextStatus == 'plan_executed' ||
+          nextStatus == 'no_plan_created') {
         _statusPollingTimer?.cancel();
         _statusPollingTimer = null;
         _loadTranscript();
@@ -336,9 +338,13 @@ class _RecordingPageState extends State<RecordingPage> {
     }
   }
 
-  Future<String> _localPath() async {
-    final appDir = await getApplicationDocumentsDirectory();
-    return '${appDir.path}/recordings/${widget.recording.localFileName}';
+  Future<String> _audioDownloadUrl() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw Exception('Not signed in');
+    final ref = FirebaseStorage.instance.ref().child(
+      '${user.uid}/inputs/${widget.recording.noteUuid}/raw_audio.mp4',
+    );
+    return ref.getDownloadURL();
   }
 
   Future<void> _togglePlay() async {
@@ -347,18 +353,22 @@ class _RecordingPageState extends State<RecordingPage> {
       if (mounted) setState(() => _isPlaying = false);
       return;
     }
-    final path = await _localPath();
-    if (!File(path).existsSync()) {
+    try {
+      final url = await _audioDownloadUrl();
+      await _player.play(UrlSource(url));
+      if (mounted) setState(() => _isPlaying = true);
+    } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Recording file not found')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not play: $e')));
       }
-      return;
     }
-    await _player.play(DeviceFileSource(path));
-    if (mounted) setState(() => _isPlaying = true);
   }
+
+  bool get _canExecutePlan =>
+      _normalizeStatus(_recordStatus) == 'plan_created' &&
+      _planActions.isNotEmpty;
 
   String get _statusLabel {
     final s = _normalizeStatus(_recordStatus);
@@ -366,6 +376,7 @@ class _RecordingPageState extends State<RecordingPage> {
     if (s == 'transcribed') return 'Transcribed';
     if (s == 'plan_created') return 'Plan created';
     if (s == 'plan_executed') return 'Plan executed';
+    if (s == 'no_plan_created') return 'No plan created';
     return s.isEmpty ? 'Unknown' : s;
   }
 
@@ -375,6 +386,7 @@ class _RecordingPageState extends State<RecordingPage> {
     if (s == 'transcribed') return Colors.yellow.shade700;
     if (s == 'plan_created') return Colors.orange;
     if (s == 'plan_executed') return Colors.green;
+    if (s == 'no_plan_created') return Colors.red;
     return Colors.grey;
   }
 
@@ -533,6 +545,17 @@ class _RecordingPageState extends State<RecordingPage> {
               else if (_planEmptyReason != null &&
                   _planEmptyReason!.trim().isNotEmpty)
                 Card(
+                  color:
+                      _normalizeStatus(_recordStatus) == 'no_plan_created'
+                          ? Colors.red.shade50
+                          : null,
+                  shape:
+                      _normalizeStatus(_recordStatus) == 'no_plan_created'
+                          ? RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: const BorderSide(color: Colors.red, width: 2),
+                          )
+                          : null,
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Text(
@@ -560,7 +583,10 @@ class _RecordingPageState extends State<RecordingPage> {
               const SizedBox(height: 12),
               FilledButton.icon(
                 onPressed:
-                    _loadingPlan || _executingPlan || _isPlanExecuted
+                    _loadingPlan ||
+                            _executingPlan ||
+                            _isPlanExecuted ||
+                            !_canExecutePlan
                         ? null
                         : _overwriteAndExecutePlan,
                 icon:

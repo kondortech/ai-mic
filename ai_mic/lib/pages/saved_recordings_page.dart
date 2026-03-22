@@ -1,12 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../models/recording.dart';
 import '../services/recording_sync_service.dart';
@@ -24,7 +22,7 @@ class SavedRecordingsPage extends StatefulWidget {
 class SavedRecordingsPageState extends State<SavedRecordingsPage> {
   List<SavedRecording> _recordings = [];
   final AudioPlayer _player = AudioPlayer();
-  String? _playingFileName;
+  String? _playingNoteUuid;
   bool _loading = true;
   Timer? _statusPollingTimer;
   bool _pollingInProgress = false;
@@ -37,7 +35,9 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
 
   bool _isTerminalStatus(String? status) {
     final s = _normalizeStatus(status);
-    return s == 'plan_created' || s == 'plan_executed';
+    return s == 'plan_created' ||
+        s == 'plan_executed' ||
+        s == 'no_plan_created';
   }
 
   bool _canDelete(SavedRecording recording) {
@@ -69,6 +69,7 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
     if (s == 'transcribed') return const Color.fromARGB(255, 243, 229, 193);
     if (s == 'plan_created') return Colors.orange;
     if (s == 'plan_executed') return Colors.green;
+    if (s == 'no_plan_created') return Colors.red;
     return null;
   }
 
@@ -77,7 +78,7 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
     super.initState();
     _loadRecordings();
     _player.onPlayerComplete.listen((_) {
-      if (mounted) setState(() => _playingFileName = null);
+      if (mounted) setState(() => _playingNoteUuid = null);
     });
   }
 
@@ -89,10 +90,8 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
   }
 
   Future<void> _loadRecordings() async {
-    final appDir = await getApplicationDocumentsDirectory();
-    final metaPath = '${appDir.path}/recordings_meta.json';
-    final file = File(metaPath);
-    if (!await file.exists()) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
       if (mounted) {
         setState(() {
           _recordings = [];
@@ -102,29 +101,40 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
       return;
     }
     try {
-      final content = await file.readAsString();
-      final decoded = jsonDecode(content) as List<dynamic>;
-      final statusByNoteUuid = await _fetchStatusByNoteUuid();
+      final snapshot =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('inputs')
+              .orderBy('createdAt', descending: true)
+              .get();
+
       final list = <SavedRecording>[];
-      for (final e in decoded) {
-        final map = Map<String, String>.from(e as Map);
-        final noteUuid = map['noteUuid'];
-        final localFileName = map['localFileName'];
-        final title = map['title'] ?? '';
-        final timestamp = map['timestamp'] ?? '';
-        if (noteUuid == null || noteUuid.isEmpty) continue;
-        if (localFileName == null || localFileName.isEmpty) continue;
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final title = data['title'] as String? ?? '';
+        final status = data['status'] as String?;
+        final deleted = data['deleted'] as bool? ?? false;
+        if (deleted) continue; // Filter soft-deleted in memory
+
+        final createdAt = data['createdAt'];
+        final String timestamp;
+        if (createdAt != null && createdAt is Timestamp) {
+          timestamp = createdAt.toDate().toIso8601String();
+        } else {
+          timestamp = '';
+        }
+
         list.add(
           SavedRecording(
-            noteUuid: noteUuid,
-            localFileName: localFileName,
+            noteUuid: doc.id,
             title: title,
             timestamp: timestamp,
-            status: statusByNoteUuid[noteUuid],
+            status: status,
           ),
         );
       }
-      list.sort((a, b) => (b.timestamp).compareTo(a.timestamp));
+
       if (mounted) {
         setState(() {
           _recordings = list;
@@ -132,7 +142,7 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
         });
       }
       if (mounted) _syncPollingWithCurrentStatuses();
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         setState(() {
           _recordings = [];
@@ -261,7 +271,6 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
         final old = _recordings[index];
         _recordings[index] = SavedRecording(
           noteUuid: old.noteUuid,
-          localFileName: old.localFileName,
           title: old.title,
           timestamp: old.timestamp,
           status: nextStatus,
@@ -282,29 +291,33 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
 
   void refresh() => _loadRecordings();
 
-  Future<String> _pathFor(SavedRecording r) async {
-    final appDir = await getApplicationDocumentsDirectory();
-    return '${appDir.path}/recordings/${r.localFileName}';
+  Future<String> _downloadUrlFor(SavedRecording r) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw Exception('Not signed in');
+    final ref = FirebaseStorage.instance.ref().child(
+      '${user.uid}/inputs/${r.noteUuid}/raw_audio.mp4',
+    );
+    return ref.getDownloadURL();
   }
 
   Future<void> _togglePlay(SavedRecording r) async {
-    if (_playingFileName == r.localFileName) {
+    if (_playingNoteUuid == r.noteUuid) {
       await _player.stop();
-      if (mounted) setState(() => _playingFileName = null);
+      if (mounted) setState(() => _playingNoteUuid = null);
       return;
     }
-    final path = await _pathFor(r);
-    if (!File(path).existsSync()) {
+    try {
+      final url = await _downloadUrlFor(r);
+      await _player.stop();
+      await _player.play(UrlSource(url));
+      if (mounted) setState(() => _playingNoteUuid = r.noteUuid);
+    } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Recording file not found')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not play: $e')));
       }
-      return;
     }
-    await _player.stop();
-    await _player.play(DeviceFileSource(path));
-    if (mounted) setState(() => _playingFileName = r.localFileName);
   }
 
   Future<void> _deleteRecording(SavedRecording r) async {
@@ -331,63 +344,37 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
       }
       return;
     }
-    if (_playingFileName == r.localFileName) {
+    if (_playingNoteUuid == r.noteUuid) {
       await _player.stop();
-      if (mounted) setState(() => _playingFileName = null);
-    }
-    final appDir = await getApplicationDocumentsDirectory();
-    final filePath = '${appDir.path}/recordings/${r.localFileName}';
-    try {
-      final file = File(filePath);
-      if (await file.exists()) {
-        await file.delete();
-      }
-    } catch (_) {}
-    final metaPath = '${appDir.path}/recordings_meta.json';
-    final metaFile = File(metaPath);
-    if (!await metaFile.exists()) {
-      if (mounted) _loadRecordings();
-      return;
+      if (mounted) setState(() => _playingNoteUuid = null);
     }
     try {
-      final content = await metaFile.readAsString();
-      final decoded = jsonDecode(content) as List<dynamic>;
-      final list =
-          decoded
-              .map((e) => Map<String, String>.from(e as Map))
-              .where((e) => e['localFileName'] != r.localFileName)
-              .toList();
-      await metaFile.writeAsString(
-        const JsonEncoder.withIndent('  ').convert(list),
+      await RecordingSyncService.instance.markNoteDeleted(
+        noteUuid: r.noteUuid,
+        onError: (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+          }
+        },
       );
       if (mounted) {
         setState(() {
           _recordings =
-              _recordings
-                  .where((x) => x.localFileName != r.localFileName)
-                  .toList();
+              _recordings.where((x) => x.noteUuid != r.noteUuid).toList();
         });
         _syncPollingWithCurrentStatuses();
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Recording deleted')));
       }
-      // One-way sync: mark as deleted in Firestore (soft delete; file stays in Storage)
-      RecordingSyncService.instance.markNoteDeleted(
-        noteUuid: r.noteUuid,
-        onError: (e) {
-          if (mounted) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('Sync delete failed: $e')));
-          }
-        },
-      );
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
-        _loadRecordings();
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
       }
-      if (mounted) _syncPollingWithCurrentStatuses();
     }
   }
 
@@ -439,8 +426,7 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
                             itemCount: _recordings.length,
                             itemBuilder: (context, index) {
                               final r = _recordings[index];
-                              final isPlaying =
-                                  _playingFileName == r.localFileName;
+                              final isPlaying = _playingNoteUuid == r.noteUuid;
                               final borderColor = _statusBorderColor(r.status);
                               final canDelete = _canDelete(r);
                               return Card(

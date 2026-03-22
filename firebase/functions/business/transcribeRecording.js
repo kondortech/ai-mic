@@ -165,8 +165,9 @@ async function transcribeRecordingBusiness(data, ctx) {
       );
 
     const llmKey = getGeminiApiKey();
-    const llmModel = getGeminiModel().trim() || "gemini-1.5-flash";
+    const llmModel = getGeminiModel().trim() || "gemini-2.5-flash";
     let planPath = `${userId}/${INPUTS_SEGMENT}/${parsedNoteUuid}/${PLAN_FILENAME}`;
+    let planHasActions = false;
     try {
       if (llmKey) {
         const planRes = await buildAndSavePlanOnly({
@@ -178,6 +179,7 @@ async function transcribeRecordingBusiness(data, ctx) {
           geminiModelName: llmModel,
         });
         planPath = planRes.planPath;
+        planHasActions = (planRes.actionsCount ?? 0) > 0;
       } else {
         const fallbackPlan = {
           actions: [],
@@ -204,13 +206,14 @@ async function transcribeRecordingBusiness(data, ctx) {
       });
     }
 
+    const planStatus = planHasActions ? "plan_created" : "no_plan_created";
     await firestore
       .collection("users")
       .doc(userId)
       .collection("inputs")
       .doc(parsedNoteUuid)
       .set(
-        { status: "plan_created", updatedAt: FieldValue.serverTimestamp() },
+        { status: planStatus, updatedAt: FieldValue.serverTimestamp() },
         { merge: true }
       );
 

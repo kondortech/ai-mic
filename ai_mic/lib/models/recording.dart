@@ -13,20 +13,21 @@ String formatTimestamp(String iso) {
   }
 }
 
+/// Represents a recording stored in Firebase (Firestore + Storage).
+/// Source of truth is cloud; no local file persistence.
 class SavedRecording {
   SavedRecording({
     required this.noteUuid,
-    required this.localFileName,
     required this.title,
     required this.timestamp,
     this.status,
   });
 
   final String noteUuid;
-  final String localFileName;
   final String title;
   final String timestamp;
-  /// From Firestore: e.g. `audio`, `transcribed`.
+
+  /// From Firestore: e.g. `uploaded`, `transcribed`, `plan_created`, `plan_executed`.
   final String? status;
 
   String get displayTitle =>
