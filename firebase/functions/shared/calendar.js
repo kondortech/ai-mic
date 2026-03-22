@@ -62,16 +62,18 @@ async function executePlanActions({
   oauthClientSecret,
 }) {
   const results = [];
-  for (const action of actions) {
+  for (let i = 0; i < actions.length; i++) {
+    const action = actions[i];
     const tool = action.tool;
     const args = action.arguments || {};
+    const inputRef = { uuid: inputUuid, index: i };
     try {
       if (tool === "create_note") {
         const noteRef = firestore.collection("users").doc(uid).collection("notes").doc();
         await noteRef.set({
           title: String(args.title || "").trim(),
           text: String(args.text || "").trim(),
-          input_uuid: inputUuid,
+          input_ref: inputRef,
           created_at: FieldValue.serverTimestamp(),
         });
         results.push({ tool, ok: true, details: `created users/${uid}/notes/${noteRef.id}` });
@@ -116,7 +118,7 @@ async function executePlanActions({
           event_start_timestamp: startTime,
           event_end_timestamp: finishTime,
           timezone,
-          input_uuid: inputUuid,
+          input_ref: inputRef,
           created_at: FieldValue.serverTimestamp(),
           google_event_id: googleEvent?.id || null,
         });

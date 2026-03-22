@@ -58,3 +58,6 @@ app.*.map.json
 
 # Cursor skills
 skills-lock.json
+
+# Generated l10n (run `make gen-l10n` or `flutter gen-l10n`)
+lib/l10n/app_localizations*.dart

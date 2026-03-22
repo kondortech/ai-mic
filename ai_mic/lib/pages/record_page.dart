@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+
+import '../l10n/app_localizations.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
@@ -10,7 +12,7 @@ import 'package:uuid/uuid.dart';
 import '../services/api_service.dart';
 import '../services/recording_sync_service.dart';
 
-import 'profile_page.dart';
+import 'saved_recordings_page.dart';
 
 enum PageState { idle, recording, uploading }
 
@@ -45,8 +47,9 @@ class RecordPageState extends State<RecordPage> {
     final hasPermission = await _ensurePermission();
     if (!hasPermission) {
       if (mounted) {
+        final l10n = AppLocalizations.of(context)!;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission is required')),
+          SnackBar(content: Text(l10n.recordMicPermissionRequired)),
         );
       }
       return;
@@ -64,9 +67,10 @@ class RecordPageState extends State<RecordPage> {
       if (mounted) setState(() => _state = PageState.recording);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to start recording: $e')),
-        );
+        final l10n = AppLocalizations.of(context)!;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l10n.recordFailedToStart)));
       }
     }
   }
@@ -92,17 +96,20 @@ class RecordPageState extends State<RecordPage> {
           title: title,
           onError: (e) {
             if (mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text('Upload failed: $e')));
+              final l10n = AppLocalizations.of(context)!;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(l10n.recordErrorWithMessage(e.toString())),
+                ),
+              );
             }
           },
         );
 
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Recording saved')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppLocalizations.of(context)!.recordSaved)),
+          );
           widget.onRecordingSavedToCloud?.call(noteUuid);
         }
         unawaited(
@@ -129,9 +136,15 @@ class RecordPageState extends State<RecordPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to stop recording: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppLocalizations.of(
+                context,
+              )!.recordStopErrorWithMessage(e.toString()),
+            ),
+          ),
+        );
         setState(() => _state = PageState.idle);
       }
     }
@@ -139,16 +152,20 @@ class RecordPageState extends State<RecordPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AI Mic'),
+        title: Text(l10n.appTitle),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
           IconButton(
-            icon: const Icon(Icons.person),
+            icon: const Icon(Icons.folder_open),
+            tooltip: l10n.recordSavedRecordingsTooltip,
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const ProfilePage()),
+                MaterialPageRoute<void>(
+                  builder: (_) => const SavedRecordingsPage(),
+                ),
               );
             },
           ),
@@ -159,6 +176,7 @@ class RecordPageState extends State<RecordPage> {
   }
 
   Widget _buildMain() {
+    final l10n = AppLocalizations.of(context)!;
     final isRecording = _state == PageState.recording;
     final isUploading = _state == PageState.uploading;
     return Center(
@@ -199,10 +217,10 @@ class RecordPageState extends State<RecordPage> {
               const SizedBox(height: 16),
               Text(
                 isUploading
-                    ? 'Saving...'
+                    ? l10n.recordSaving
                     : isRecording
-                    ? 'Tap to stop recording'
-                    : 'Tap to record',
+                    ? l10n.recordTapToStop
+                    : l10n.recordTapToRecord,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
             ],

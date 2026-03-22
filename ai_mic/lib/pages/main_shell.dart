@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/recording.dart';
+import 'calendar_events_page.dart';
+import 'notes_page.dart';
+import 'profile_page.dart';
 import 'record_page.dart';
 import 'recording_page.dart';
-import 'saved_recordings_page.dart';
+import 'tools_page.dart';
 
-/// Bottom nav shell with Record and Saved Recordings pages.
+/// Bottom nav shell: Notes, Calendar, Mic (Record), Tools, Profile.
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
@@ -14,14 +18,11 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> {
-  int _currentIndex = 0;
+  int _currentIndex = 2; // Mic is the default/focal tab
   final GlobalKey<RecordPageState> _recordPageKey =
       GlobalKey<RecordPageState>();
-  final GlobalKey<SavedRecordingsPageState> _savedRecordingsKey = GlobalKey();
 
   void _onRecordingSaved(String noteUuid) {
-    setState(() => _currentIndex = 1);
-    _savedRecordingsKey.currentState?.refresh();
     final recording = SavedRecording(
       noteUuid: noteUuid,
       title: '',
@@ -37,28 +38,48 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
         children: [
+          const NotesPage(),
+          const CalendarEventsPage(),
           RecordPage(
             key: _recordPageKey,
             onRecordingSavedToCloud: _onRecordingSaved,
           ),
-          SavedRecordingsPage(key: _savedRecordingsKey),
+          const ToolsPage(),
+          const ProfilePage(),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) {
           setState(() => _currentIndex = index);
-          if (index == 1) {
-            _savedRecordingsKey.currentState?.refresh();
-          }
         },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.mic), label: 'Record'),
-          BottomNavigationBarItem(icon: Icon(Icons.list), label: 'Saved'),
+        type: BottomNavigationBarType.fixed,
+        items: [
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.note),
+            label: l10n.navNotes,
+          ),
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.calendar_today),
+            label: l10n.navCalendar,
+          ),
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.mic),
+            label: l10n.navRecord,
+          ),
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.build),
+            label: l10n.navTools,
+          ),
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.person),
+            label: l10n.navProfile,
+          ),
         ],
       ),
     );

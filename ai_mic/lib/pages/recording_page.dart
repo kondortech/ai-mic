@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/recording.dart';
 import '../services/api_service.dart';
 
@@ -150,10 +151,11 @@ class _RecordingPageState extends State<RecordingPage> {
           _transcriptError = null;
         });
       } else if (mounted) {
+        final l10n = AppLocalizations.of(context)!;
         setState(() {
           _transcript = null;
           _loadingTranscript = false;
-          _transcriptError = 'Transcript not found';
+          _transcriptError = l10n.recordingTranscriptNotFound;
         });
       }
     } catch (e) {
@@ -245,7 +247,7 @@ class _RecordingPageState extends State<RecordingPage> {
     });
   }
 
-  Future<void> _pickTimestampForArg(int actionIndex, String key) async {
+  Future<String?> _pickTimestampForArg(int actionIndex, String key) async {
     final args = _planActions[actionIndex]['arguments'] as Map<String, dynamic>;
     final currentRaw = args[key]?.toString();
     final parsedCurrent =
@@ -258,14 +260,14 @@ class _RecordingPageState extends State<RecordingPage> {
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
     );
-    if (date == null) return;
-    if (!mounted) return;
+    if (date == null) return null;
+    if (!mounted) return null;
 
     final time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(initialDate),
     );
-    if (time == null) return;
+    if (time == null) return null;
 
     final combined = DateTime(
       date.year,
@@ -274,7 +276,9 @@ class _RecordingPageState extends State<RecordingPage> {
       time.hour,
       time.minute,
     );
-    _updateActionArg(actionIndex, key, combined.toIso8601String());
+    final value = combined.toIso8601String();
+    _updateActionArg(actionIndex, key, value);
+    return value;
   }
 
   Future<void> _overwriteAndExecutePlan() async {
@@ -316,22 +320,28 @@ class _RecordingPageState extends State<RecordingPage> {
       await _pollStatusOnce();
 
       if (mounted) {
+        final l10n = AppLocalizations.of(context)!;
         final executed = result.executed == true;
         final message =
             executed
-                ? 'Plan executed successfully'
+                ? l10n.recordingPlanExecutionSuccess
                 : ((result.reason != null && result.reason!.isNotEmpty)
                     ? result.reason!
-                    : 'Plan has no actions');
+                    : l10n.recordingPlanNoActions);
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(message)));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Plan execution failed: $e')));
+        final l10n = AppLocalizations.of(context)!;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              l10n.recordingPlanExecutionFailedWithMessage(e.toString()),
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _executingPlan = false);
@@ -359,9 +369,12 @@ class _RecordingPageState extends State<RecordingPage> {
       if (mounted) setState(() => _isPlaying = true);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Could not play: $e')));
+        final l10n = AppLocalizations.of(context)!;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.recordingCouldNotPlayWithMessage(e.toString())),
+          ),
+        );
       }
     }
   }
@@ -370,14 +383,15 @@ class _RecordingPageState extends State<RecordingPage> {
       _normalizeStatus(_recordStatus) == 'plan_created' &&
       _planActions.isNotEmpty;
 
-  String get _statusLabel {
+  String _statusLabel(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final s = _normalizeStatus(_recordStatus);
-    if (s == 'uploaded') return 'Uploaded';
-    if (s == 'transcribed') return 'Transcribed';
-    if (s == 'plan_created') return 'Plan created';
-    if (s == 'plan_executed') return 'Plan executed';
-    if (s == 'no_plan_created') return 'No plan created';
-    return s.isEmpty ? 'Unknown' : s;
+    if (s == 'uploaded') return l10n.recordingStatusUploaded;
+    if (s == 'transcribed') return l10n.recordingStatusTranscribed;
+    if (s == 'plan_created') return l10n.recordingStatusPlanCreated;
+    if (s == 'plan_executed') return l10n.recordingStatusPlanExecuted;
+    if (s == 'no_plan_created') return l10n.recordingStatusNoPlanCreated;
+    return s.isEmpty ? l10n.recordingStatusUnknown : s;
   }
 
   Color get _statusColor {
@@ -392,6 +406,7 @@ class _RecordingPageState extends State<RecordingPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final r = widget.recording;
     return Scaffold(
       appBar: AppBar(
@@ -435,7 +450,7 @@ class _RecordingPageState extends State<RecordingPage> {
               ),
               const SizedBox(height: 24),
               Text(
-                _statusLabel,
+                _statusLabel(context),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: _statusColor,
                   fontWeight: FontWeight.w600,
@@ -444,7 +459,7 @@ class _RecordingPageState extends State<RecordingPage> {
               ),
               const SizedBox(height: 24),
               Text(
-                'Transcription',
+                l10n.recordingTranscription,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
@@ -486,8 +501,8 @@ class _RecordingPageState extends State<RecordingPage> {
                     padding: const EdgeInsets.all(16),
                     child: Text(
                       _recordStatus == 'transcribed'
-                          ? 'No transcription text.'
-                          : 'Transcription not ready yet. Polling for completion...',
+                          ? l10n.recordingNoTranscriptionText
+                          : l10n.recordingTranscriptionNotReady,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Theme.of(
                           context,
@@ -498,13 +513,13 @@ class _RecordingPageState extends State<RecordingPage> {
                 ),
               const SizedBox(height: 24),
               Text(
-                'Execution Plan',
+                l10n.recordingExecutionPlan,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
               if (_isPlanExecuted)
                 Text(
-                  'Plan is executed. Editing is disabled.',
+                  l10n.recordingPlanExecutedEditingDisabled,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(
                       context,
@@ -570,8 +585,8 @@ class _RecordingPageState extends State<RecordingPage> {
                     padding: const EdgeInsets.all(16),
                     child: Text(
                       _recordStatus == 'transcribed'
-                          ? 'Plan not generated yet.'
-                          : 'Plan will be generated after transcription.',
+                          ? l10n.recordingPlanNotGenerated
+                          : l10n.recordingPlanWillBeGenerated,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Theme.of(
                           context,
@@ -598,7 +613,9 @@ class _RecordingPageState extends State<RecordingPage> {
                         )
                         : const Icon(Icons.playlist_add_check),
                 label: Text(
-                  _executingPlan ? 'Executing...' : 'Save & Execute Plan',
+                  _executingPlan
+                      ? l10n.recordingExecuting
+                      : l10n.recordingSaveAndExecute,
                 ),
               ),
             ],
@@ -645,6 +662,70 @@ class _RecordingPageState extends State<RecordingPage> {
   }
 }
 
+class _TimestampFormField extends StatefulWidget {
+  const _TimestampFormField({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final bool enabled;
+  final Future<String?> Function() onTap;
+
+  @override
+  State<_TimestampFormField> createState() => _TimestampFormFieldState();
+}
+
+class _TimestampFormFieldState extends State<_TimestampFormField> {
+  late TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.value);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(_TimestampFormField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != oldWidget.value) {
+      _controller.text = widget.value;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      readOnly: true,
+      enabled: widget.enabled,
+      controller: _controller,
+      decoration: InputDecoration(
+        labelText: widget.label,
+        suffixIcon: const Icon(Icons.calendar_today),
+      ),
+      onTap:
+          widget.enabled
+              ? () async {
+                final result = await widget.onTap();
+                if (result != null && mounted) {
+                  _controller.text = result;
+                }
+              }
+              : null,
+    );
+  }
+}
+
 class _CreateNoteActionCard extends StatelessWidget {
   const _CreateNoteActionCard({
     required this.actionIndex,
@@ -662,58 +743,161 @@ class _CreateNoteActionCard extends StatelessWidget {
   final void Function(String key, String value) onArgChanged;
   final bool enabled;
 
+  String get _title => (arguments['title']?.toString() ?? '').trim();
+  String get _textPreview => (arguments['text']?.toString() ?? '').trim();
+
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Action ${actionIndex + 1} · Create Note',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              initialValue: (action['tool'] as String?) ?? 'create_note',
-              items: const [
-                DropdownMenuItem(
-                  value: 'create_note',
-                  child: Text('create_note'),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: () => _showEditSheet(context),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.note,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      l10n.recordingActionCreateNote(actionIndex + 1),
+                      style: Theme.of(context).textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _title.isEmpty ? l10n.recordingNoTitle : _title,
+                style: Theme.of(context).textTheme.bodyMedium,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (_textPreview.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _textPreview,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.6),
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                DropdownMenuItem(
-                  value: 'create_calendar_event',
-                  child: Text('create_calendar_event'),
+              ] else ...[
+                const SizedBox(height: 4),
+                Text(
+                  _title.isEmpty
+                      ? l10n.recordingAddTitleAndText
+                      : l10n.recordingNoText,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
                 ),
               ],
-              onChanged: (value) {
-                if (!enabled) return;
-                if (value != null) onToolChanged(value);
-              },
-              disabledHint: Text((action['tool'] as String?) ?? 'create_note'),
-              decoration: const InputDecoration(labelText: 'Tool'),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              initialValue: arguments['title']?.toString() ?? '',
-              enabled: enabled,
-              decoration: const InputDecoration(labelText: 'Title'),
-              onChanged: (value) => onArgChanged('title', value),
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              initialValue: arguments['text']?.toString() ?? '',
-              enabled: enabled,
-              decoration: const InputDecoration(labelText: 'Text'),
-              minLines: 2,
-              maxLines: 6,
-              onChanged: (value) => onArgChanged('text', value),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  void _showEditSheet(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder:
+          (sheetContext) => DraggableScrollableSheet(
+            initialChildSize: 0.6,
+            maxChildSize: 0.9,
+            minChildSize: 0.3,
+            expand: false,
+            builder:
+                (sheetCtx, scrollController) => SingleChildScrollView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Theme.of(
+                              sheetCtx,
+                            ).colorScheme.onSurface.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        l10n.recordingEditAction(actionIndex + 1),
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 24),
+                      DropdownButtonFormField<String>(
+                        value: (action['tool'] as String?) ?? 'create_note',
+                        items: [
+                          DropdownMenuItem(
+                            value: 'create_note',
+                            child: Text(l10n.recordingCreateNoteTool),
+                          ),
+                          DropdownMenuItem(
+                            value: 'create_calendar_event',
+                            child: Text(l10n.recordingCreateCalendarEventTool),
+                          ),
+                        ],
+                        onChanged:
+                            enabled
+                                ? (value) {
+                                  if (value != null) onToolChanged(value);
+                                }
+                                : null,
+                        decoration: InputDecoration(
+                          labelText: l10n.recordingTool,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        initialValue: arguments['title']?.toString() ?? '',
+                        enabled: enabled,
+                        decoration: InputDecoration(
+                          labelText: l10n.recordingTitle,
+                        ),
+                        onChanged: (value) => onArgChanged('title', value),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        initialValue: arguments['text']?.toString() ?? '',
+                        enabled: enabled,
+                        decoration: InputDecoration(
+                          labelText: l10n.recordingText,
+                        ),
+                        minLines: 3,
+                        maxLines: 6,
+                        onChanged: (value) => onArgChanged('text', value),
+                      ),
+                    ],
+                  ),
+                ),
+          ),
     );
   }
 }
@@ -734,102 +918,224 @@ class _CreateCalendarEventActionCard extends StatelessWidget {
   final Map<String, dynamic> arguments;
   final ValueChanged<String> onToolChanged;
   final void Function(String key, String value) onArgChanged;
-  final Future<void> Function(String key) onPickTimestamp;
+  final Future<String?> Function(String key) onPickTimestamp;
   final bool enabled;
+
+  String get _eventTitle => (arguments['title']?.toString() ?? '').trim();
+  String get _startTime => arguments['start_time']?.toString() ?? '';
+  String get _finishTime => arguments['finish_time']?.toString() ?? '';
+
+  String _formatTimestamp(String iso) {
+    final dt = DateTime.tryParse(iso);
+    if (dt == null) return iso;
+    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _formatTimestampRange(String start, String end) {
+    if (start.isEmpty && end.isEmpty) return '';
+    if (start.isEmpty) return _formatTimestamp(end);
+    if (end.isEmpty) return _formatTimestamp(start);
+    final startDt = DateTime.tryParse(start);
+    final endDt = DateTime.tryParse(end);
+    if (startDt == null) return end;
+    final startStr = _formatTimestamp(start);
+    if (endDt == null) return startStr;
+    final isSameDay =
+        startDt.year == endDt.year &&
+        startDt.month == endDt.month &&
+        startDt.day == endDt.day;
+    final endStr =
+        isSameDay
+            ? '${endDt.hour.toString().padLeft(2, '0')}:${endDt.minute.toString().padLeft(2, '0')}'
+            : _formatTimestamp(end);
+    return '$startStr – $endStr';
+  }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Action ${actionIndex + 1} · Create Calendar Event',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              initialValue:
-                  (action['tool'] as String?) ?? 'create_calendar_event',
-              items: const [
-                DropdownMenuItem(
-                  value: 'create_note',
-                  child: Text('create_note'),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: () => _showEditSheet(context),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.event,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      l10n.recordingActionCreateCalendarEvent(actionIndex + 1),
+                      style: Theme.of(context).textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _eventTitle.isEmpty ? l10n.recordingNoTitle : _eventTitle,
+                style: Theme.of(context).textTheme.bodyMedium,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (_startTime.isNotEmpty || _finishTime.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _formatTimestampRange(_startTime, _finishTime),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.6),
+                  ),
                 ),
-                DropdownMenuItem(
-                  value: 'create_calendar_event',
-                  child: Text('create_calendar_event'),
+              ] else ...[
+                const SizedBox(height: 4),
+                Text(
+                  l10n.recordingSetEventTime,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
                 ),
               ],
-              onChanged: (value) {
-                if (!enabled) return;
-                if (value != null) onToolChanged(value);
-              },
-              disabledHint: Text(
-                (action['tool'] as String?) ?? 'create_calendar_event',
-              ),
-              decoration: const InputDecoration(labelText: 'Tool'),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              initialValue: arguments['title']?.toString() ?? '',
-              enabled: enabled,
-              decoration: const InputDecoration(labelText: 'Event title'),
-              onChanged: (value) => onArgChanged('title', value),
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              initialValue: arguments['description']?.toString() ?? '',
-              enabled: enabled,
-              decoration: const InputDecoration(labelText: 'Event description'),
-              minLines: 2,
-              maxLines: 4,
-              onChanged: (value) => onArgChanged('description', value),
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              key: ValueKey(
-                'action_${actionIndex}_start_time_${arguments['start_time']?.toString() ?? ''}',
-              ),
-              readOnly: true,
-              enabled: enabled,
-              initialValue: arguments['start_time']?.toString() ?? '',
-              decoration: const InputDecoration(
-                labelText: 'Start timestamp',
-                suffixIcon: Icon(Icons.calendar_today),
-              ),
-              onTap: enabled ? () => onPickTimestamp('start_time') : null,
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              key: ValueKey(
-                'action_${actionIndex}_finish_time_${arguments['finish_time']?.toString() ?? ''}',
-              ),
-              readOnly: true,
-              enabled: enabled,
-              initialValue: arguments['finish_time']?.toString() ?? '',
-              decoration: const InputDecoration(
-                labelText: 'Finish timestamp',
-                suffixIcon: Icon(Icons.calendar_today),
-              ),
-              onTap: enabled ? () => onPickTimestamp('finish_time') : null,
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              initialValue:
-                  arguments['timezone']?.toString().trim().isNotEmpty == true
-                      ? arguments['timezone']?.toString()
-                      : 'local',
-              enabled: enabled,
-              decoration: const InputDecoration(labelText: 'Timezone'),
-              onChanged: (value) => onArgChanged('timezone', value),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  void _showEditSheet(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder:
+          (sheetContext) => DraggableScrollableSheet(
+            initialChildSize: 0.7,
+            maxChildSize: 0.95,
+            minChildSize: 0.3,
+            expand: false,
+            builder:
+                (sheetCtx, scrollController) => SingleChildScrollView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Theme.of(
+                              sheetCtx,
+                            ).colorScheme.onSurface.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        l10n.recordingEditAction(actionIndex + 1),
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 24),
+                      DropdownButtonFormField<String>(
+                        value:
+                            (action['tool'] as String?) ??
+                            'create_calendar_event',
+                        items: [
+                          DropdownMenuItem(
+                            value: 'create_note',
+                            child: Text(l10n.recordingCreateNoteTool),
+                          ),
+                          DropdownMenuItem(
+                            value: 'create_calendar_event',
+                            child: Text(l10n.recordingCreateCalendarEventTool),
+                          ),
+                        ],
+                        onChanged:
+                            enabled
+                                ? (value) {
+                                  if (value != null) onToolChanged(value);
+                                }
+                                : null,
+                        decoration: InputDecoration(
+                          labelText: l10n.recordingTool,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        initialValue: arguments['title']?.toString() ?? '',
+                        enabled: enabled,
+                        decoration: InputDecoration(
+                          labelText: l10n.recordingEventTitle,
+                        ),
+                        onChanged: (value) => onArgChanged('title', value),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        initialValue:
+                            arguments['description']?.toString() ?? '',
+                        enabled: enabled,
+                        decoration: InputDecoration(
+                          labelText: l10n.recordingEventDescription,
+                        ),
+                        minLines: 2,
+                        maxLines: 4,
+                        onChanged:
+                            (value) => onArgChanged('description', value),
+                      ),
+                      const SizedBox(height: 16),
+                      _TimestampFormField(
+                        key: ValueKey('start_${arguments['start_time']}'),
+                        label: l10n.recordingStartTimestamp,
+                        value: arguments['start_time']?.toString() ?? '',
+                        enabled: enabled,
+                        onTap: () => onPickTimestamp('start_time'),
+                      ),
+                      const SizedBox(height: 16),
+                      _TimestampFormField(
+                        key: ValueKey('finish_${arguments['finish_time']}'),
+                        label: l10n.recordingFinishTimestamp,
+                        value: arguments['finish_time']?.toString() ?? '',
+                        enabled: enabled,
+                        onTap: () => onPickTimestamp('finish_time'),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        initialValue:
+                            arguments['timezone']
+                                        ?.toString()
+                                        .trim()
+                                        .isNotEmpty ==
+                                    true
+                                ? arguments['timezone']?.toString()
+                                : 'local',
+                        enabled: enabled,
+                        decoration: InputDecoration(
+                          labelText: l10n.recordingTimezone,
+                        ),
+                        onChanged: (value) => onArgChanged('timezone', value),
+                      ),
+                    ],
+                  ),
+                ),
+          ),
     );
   }
 }
@@ -851,63 +1157,152 @@ class _GenericActionCard extends StatelessWidget {
   final void Function(String key, String value) onArgChanged;
   final bool enabled;
 
+  String get _toolName => (action['tool'] as String?) ?? 'create_note';
+  String _previewText(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    if (arguments.isEmpty) return l10n.recordingNoArguments;
+    final first = arguments.entries.first;
+    final val = first.value?.toString() ?? '';
+    return val.isEmpty
+        ? '${first.key}: (empty)'
+        : '${first.key}: ${val.length > 30 ? "${val.substring(0, 30)}..." : val}';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Action ${actionIndex + 1}',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              initialValue: (action['tool'] as String?) ?? 'create_note',
-              items: const [
-                DropdownMenuItem(
-                  value: 'create_note',
-                  child: Text('create_note'),
-                ),
-                DropdownMenuItem(
-                  value: 'create_calendar_event',
-                  child: Text('create_calendar_event'),
-                ),
-              ],
-              onChanged: (value) {
-                if (!enabled) return;
-                if (value != null) onToolChanged(value);
-              },
-              disabledHint: Text((action['tool'] as String?) ?? 'create_note'),
-              decoration: const InputDecoration(labelText: 'Tool'),
-            ),
-            const SizedBox(height: 12),
-            ...arguments.entries.map((entry) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: TextFormField(
-                  initialValue: entry.value?.toString() ?? '',
-                  enabled: enabled,
-                  decoration: InputDecoration(labelText: entry.key),
-                  onChanged: (value) => onArgChanged(entry.key, value),
-                ),
-              );
-            }),
-            if (arguments.isEmpty)
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: () => _showEditSheet(context),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.build,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      l10n.recordingActionGeneric(actionIndex + 1, _toolName),
+                      style: Theme.of(context).textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
               Text(
-                'No arguments',
+                _previewText(context),
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(
                     context,
                   ).colorScheme.onSurface.withValues(alpha: 0.6),
                 ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-          ],
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  void _showEditSheet(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder:
+          (sheetContext) => DraggableScrollableSheet(
+            initialChildSize: 0.6,
+            maxChildSize: 0.9,
+            minChildSize: 0.3,
+            expand: false,
+            builder:
+                (sheetCtx, scrollController) => SingleChildScrollView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Theme.of(
+                              sheetCtx,
+                            ).colorScheme.onSurface.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        l10n.recordingEditAction(actionIndex + 1),
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 24),
+                      DropdownButtonFormField<String>(
+                        value: (action['tool'] as String?) ?? 'create_note',
+                        items: [
+                          DropdownMenuItem(
+                            value: 'create_note',
+                            child: Text(l10n.recordingCreateNoteTool),
+                          ),
+                          DropdownMenuItem(
+                            value: 'create_calendar_event',
+                            child: Text(l10n.recordingCreateCalendarEventTool),
+                          ),
+                        ],
+                        onChanged:
+                            enabled
+                                ? (value) {
+                                  if (value != null) onToolChanged(value);
+                                }
+                                : null,
+                        decoration: InputDecoration(
+                          labelText: l10n.recordingTool,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      ...arguments.entries.map((entry) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: TextFormField(
+                            initialValue: entry.value?.toString() ?? '',
+                            enabled: enabled,
+                            decoration: InputDecoration(labelText: entry.key),
+                            onChanged:
+                                (value) => onArgChanged(entry.key, value),
+                          ),
+                        );
+                      }),
+                      if (arguments.isEmpty)
+                        Text(
+                          l10n.recordingNoArguments,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurface.withValues(alpha: 0.6),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+          ),
     );
   }
 }

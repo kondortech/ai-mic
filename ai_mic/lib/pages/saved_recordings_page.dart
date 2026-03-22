@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../l10n/app_localizations.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
@@ -9,7 +11,6 @@ import 'package:flutter/material.dart';
 import '../models/recording.dart';
 import '../services/recording_sync_service.dart';
 
-import 'profile_page.dart';
 import 'recording_page.dart';
 
 class SavedRecordingsPage extends StatefulWidget {
@@ -313,9 +314,14 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
       if (mounted) setState(() => _playingNoteUuid = r.noteUuid);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Could not play: $e')));
+        final l10n = AppLocalizations.of(context)!;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              l10n.savedRecordingsPlayErrorWithMessage(e.toString()),
+            ),
+          ),
+        );
       }
     }
   }
@@ -324,8 +330,10 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
     if (!_canDelete(r)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Recording with executed plan cannot be deleted'),
+          SnackBar(
+            content: Text(
+              AppLocalizations.of(context)!.savedRecordingsCannotDeleteExecuted,
+            ),
           ),
         );
       }
@@ -335,9 +343,9 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
     if (!canDeleteRemote) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Cannot delete this recording: plan already executed or status unavailable',
+              AppLocalizations.of(context)!.savedRecordingsCannotDeleteStatus,
             ),
           ),
         );
@@ -353,9 +361,14 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
         noteUuid: r.noteUuid,
         onError: (e) {
           if (mounted) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+            final l10n = AppLocalizations.of(context)!;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  l10n.savedRecordingsDeleteFailedWithMessage(e.toString()),
+                ),
+              ),
+            );
           }
         },
       );
@@ -365,38 +378,38 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
               _recordings.where((x) => x.noteUuid != r.noteUuid).toList();
         });
         _syncPollingWithCurrentStatuses();
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Recording deleted')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.savedRecordingsDeleted),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+        final l10n = AppLocalizations.of(context)!;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              l10n.savedRecordingsDeleteFailedWithMessage(e.toString()),
+            ),
+          ),
+        );
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Saved Recordings'),
+        title: Text(l10n.savedRecordingsTitle),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loading ? null : () => _loadRecordings(),
-            tooltip: 'Refresh status',
-          ),
-          IconButton(
-            icon: const Icon(Icons.person),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const ProfilePage()),
-              );
-            },
+            tooltip: l10n.savedRecordingsRefresh,
           ),
         ],
       ),
@@ -414,8 +427,8 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
                               SizedBox(
                                 height:
                                     MediaQuery.of(context).size.height * 0.5,
-                                child: const Center(
-                                  child: Text('No recordings yet'),
+                                child: Center(
+                                  child: Text(l10n.savedRecordingsNone),
                                 ),
                               ),
                             ],
@@ -524,8 +537,10 @@ class SavedRecordingsPageState extends State<SavedRecordingsPage> {
                                           iconSize: 28,
                                           tooltip:
                                               canDelete
-                                                  ? 'Delete'
-                                                  : 'Cannot delete executed plan recording',
+                                                  ? l10n
+                                                      .savedRecordingsDeleteTooltip
+                                                  : l10n
+                                                      .savedRecordingsCannotDeleteTooltip,
                                         ),
                                       ],
                                     ),

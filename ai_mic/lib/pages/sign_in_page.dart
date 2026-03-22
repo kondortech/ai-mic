@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../config/google_sign_in_config.dart';
+import '../l10n/app_localizations.dart';
 
 class SignInPage extends StatefulWidget {
   const SignInPage({super.key});
@@ -46,7 +47,11 @@ class _SignInPageState extends State<SignInPage> {
       }
     } on FirebaseAuthException catch (e) {
       setState(() {
-        _errorMessage = e.message ?? 'Authentication failed';
+        _errorMessage =
+            e.message ??
+            (context.mounted
+                ? AppLocalizations.of(context)!.signInAuthFailed
+                : 'Authentication failed');
         _isLoading = false;
       });
     } catch (e) {
@@ -81,7 +86,11 @@ class _SignInPageState extends State<SignInPage> {
       await FirebaseAuth.instance.signInWithCredential(credential);
     } on FirebaseAuthException catch (e) {
       setState(() {
-        _errorMessage = e.message ?? 'Google sign-in failed';
+        _errorMessage =
+            e.message ??
+            (context.mounted
+                ? AppLocalizations.of(context)!.signInGoogleFailed
+                : 'Google sign-in failed');
         _isLoading = false;
       });
     } catch (e) {
@@ -95,6 +104,7 @@ class _SignInPageState extends State<SignInPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -113,7 +123,7 @@ class _SignInPageState extends State<SignInPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'AI Mic',
+                    l10n.appTitle,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.bold,
@@ -121,9 +131,7 @@ class _SignInPageState extends State<SignInPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _isSignUp
-                        ? 'Create an account'
-                        : 'Sign in to sync recordings',
+                    _isSignUp ? l10n.signInCreateAccount : l10n.signInToSync,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(
@@ -136,14 +144,14 @@ class _SignInPageState extends State<SignInPage> {
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
                     autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
+                    decoration: InputDecoration(
+                      labelText: l10n.signInEmail,
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.email_outlined),
                     ),
                     validator: (v) {
                       if (v == null || v.trim().isEmpty)
-                        return 'Enter your email';
+                        return l10n.signInEnterEmail;
                       return null;
                     },
                   ),
@@ -151,15 +159,16 @@ class _SignInPageState extends State<SignInPage> {
                   TextFormField(
                     controller: _passwordController,
                     obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
+                    decoration: InputDecoration(
+                      labelText: l10n.signInPassword,
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.lock_outlined),
                     ),
                     validator: (v) {
-                      if (v == null || v.isEmpty) return 'Enter your password';
+                      if (v == null || v.isEmpty)
+                        return l10n.signInEnterPassword;
                       if (_isSignUp && v.length < 6) {
-                        return 'Use at least 6 characters';
+                        return l10n.signInPasswordMinChars;
                       }
                       return null;
                     },
@@ -184,7 +193,11 @@ class _SignInPageState extends State<SignInPage> {
                               width: 20,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                            : Text(_isSignUp ? 'Create account' : 'Sign in'),
+                            : Text(
+                              _isSignUp
+                                  ? l10n.signInCreateAccountButton
+                                  : l10n.signInButton,
+                            ),
                   ),
                   const SizedBox(height: 12),
                   TextButton(
@@ -197,8 +210,8 @@ class _SignInPageState extends State<SignInPage> {
                             }),
                     child: Text(
                       _isSignUp
-                          ? 'Already have an account? Sign in'
-                          : 'Need an account? Sign up',
+                          ? l10n.signInSwitchToSignIn
+                          : l10n.signInSwitchToSignUp,
                     ),
                   ),
                   const SizedBox(height: 24),
@@ -210,7 +223,7 @@ class _SignInPageState extends State<SignInPage> {
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Text(
-                          'or',
+                          l10n.signInOr,
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ),
@@ -223,7 +236,7 @@ class _SignInPageState extends State<SignInPage> {
                   OutlinedButton.icon(
                     onPressed: _isLoading ? null : _signInWithGoogle,
                     icon: const Icon(Icons.g_mobiledata_rounded, size: 24),
-                    label: const Text('Continue with Google'),
+                    label: Text(l10n.signInGoogle),
                   ),
                 ],
               ),
