@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:ai_mic_api/api.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -10,7 +11,6 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/recording.dart';
-import '../services/api_models.dart';
 import '../services/api_service.dart';
 
 /// Detail page for a single recording: name, timestamp, play/stop, status, transcription.
@@ -283,7 +283,7 @@ class _RecordingPageState extends State<RecordingPage> {
     final actions =
         _planActions
             .map(
-              (a) => PlanActionInput(
+              (a) => PlanAction(
                 tool: (a['tool'] as String?) ?? 'create_note',
                 arguments:
                     (a['arguments'] as Map<String, dynamic>?)?.map(
@@ -293,11 +293,11 @@ class _RecordingPageState extends State<RecordingPage> {
               ),
             )
             .toList();
-    final plan = ExecutionPlanInput(
+    final plan = ExecutionPlan(
       actions: actions,
       emptyReason:
           actions.isEmpty ? (_planEmptyReason ?? 'No actions in plan.') : null,
-      generatedAt: DateTime.now().toIso8601String(),
+      generatedAt: DateTime.now(),
     );
 
     setState(() => _executingPlan = true);
@@ -314,10 +314,11 @@ class _RecordingPageState extends State<RecordingPage> {
       await _pollStatusOnce();
 
       if (mounted) {
+        final executed = result.executed == true;
         final message =
-            result.executed
+            executed
                 ? 'Plan executed successfully'
-                : (result.reason != null && result.reason!.isNotEmpty
+                : ((result.reason != null && result.reason!.isNotEmpty)
                     ? result.reason!
                     : 'Plan has no actions');
         ScaffoldMessenger.of(

@@ -1,13 +1,28 @@
-// Typed API service for Firebase Cloud Functions.
-// Uses generated types internally. Exposes only domain types (from api_models.dart)
-// to the rest of the app - no OpenAPI-generated types leak outside this service.
+// Typed API service for Firebase Cloud Functions using OpenAPI-generated models
+// from package:ai_mic_api.
+
+import 'package:ai_mic_api/api.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import 'api_models.dart';
+/// JSON-safe payload for [HttpsCallable.call]. OpenAPI `dart` generator's
+/// [OverwriteExecutionPlanRequest.toJson] embeds nested objects instead of maps.
+Map<String, dynamic> _overwriteExecutionPlanRequestForCallable(
+  OverwriteExecutionPlanRequest req,
+) {
+  return {
+    'inputUuid': req.inputUuid,
+    'plan': _executionPlanForCallable(req.plan),
+  };
+}
 
-// Generated types - used only within this file
-import 'package:ai_mic_api/api.dart';
+Map<String, dynamic> _executionPlanForCallable(ExecutionPlan plan) {
+  return {
+    'actions': plan.actions.map((a) => a.toJson()).toList(),
+    'empty_reason': plan.emptyReason,
+    'generated_at': plan.generatedAt.toUtc().toIso8601String(),
+  };
+}
 
 class ApiService {
   ApiService._();
@@ -42,50 +57,28 @@ class ApiService {
   /// Overwrite and save an execution plan for an input.
   Future<void> overwriteExecutionPlan({
     required String inputUuid,
-    required ExecutionPlanInput plan,
+    required ExecutionPlan plan,
   }) async {
     _requireAuth();
-    final actionsJson =
-        plan.actions
-            .map(
-              (a) => <String, dynamic>{
-                'tool': a.tool,
-                'arguments': a.arguments,
-              },
-            )
-            .toList();
-    final planJson = <String, dynamic>{
-      'actions': actionsJson,
-      'empty_reason': plan.emptyReason,
-      'generated_at': plan.generatedAt,
-    };
-    final reqMap = <String, dynamic>{'inputUuid': inputUuid, 'plan': planJson};
+    final req = OverwriteExecutionPlanRequest(inputUuid: inputUuid, plan: plan);
     await FirebaseFunctions.instance
         .httpsCallable('overwriteExecutionPlan')
-        .call(reqMap);
+        .call(_overwriteExecutionPlanRequestForCallable(req));
   }
 
   /// Execute the stored plan for an input.
-  Future<ExecuteStoredPlanResult> executeStoredPlan(String inputUuid) async {
+  Future<ExecuteStoredPlanResponse> executeStoredPlan(String inputUuid) async {
     _requireAuth();
     final req = ExecuteStoredPlanRequest(inputUuid: inputUuid);
     final result = await FirebaseFunctions.instance
         .httpsCallable('executeStoredPlan')
         .call(req.toJson());
 
-    final data = result.data;
-    if (data is! Map) {
-      return const ExecuteStoredPlanResult(
-        executed: false,
-        reason: 'Invalid response',
-      );
+    final parsed = ExecuteStoredPlanResponse.fromJson(result.data);
+    if (parsed == null) {
+      throw Exception('Invalid executeStoredPlan response');
     }
-
-    final map = Map<String, dynamic>.from(data);
-    final executed = map['executed'] == true;
-    final reason = map['reason']?.toString();
-
-    return ExecuteStoredPlanResult(executed: executed, reason: reason);
+    return parsed;
   }
 
   void _requireAuth() {

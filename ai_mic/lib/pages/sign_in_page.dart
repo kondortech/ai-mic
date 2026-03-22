@@ -64,9 +64,10 @@ class _SignInPageState extends State<SignInPage> {
       _errorMessage = null;
     });
     try {
-      final googleSignIn = kGoogleSignInWebClientId.isEmpty
-          ? GoogleSignIn()
-          : GoogleSignIn(serverClientId: kGoogleSignInWebClientId);
+      final googleSignIn =
+          kGoogleSignInWebClientId.isEmpty
+              ? GoogleSignIn()
+              : GoogleSignIn(serverClientId: kGoogleSignInWebClientId);
       final googleUser = await googleSignIn.signIn();
       if (googleUser == null) {
         setState(() => _isLoading = false);
@@ -115,19 +116,20 @@ class _SignInPageState extends State<SignInPage> {
                     'AI Mic',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _isSignUp ? 'Create an account' : 'Sign in to sync recordings',
+                    _isSignUp
+                        ? 'Create an account'
+                        : 'Sign in to sync recordings',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.7),
-                        ),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withValues(alpha: 0.7),
+                    ),
                   ),
                   const SizedBox(height: 32),
                   TextFormField(
@@ -140,7 +142,8 @@ class _SignInPageState extends State<SignInPage> {
                       prefixIcon: Icon(Icons.email_outlined),
                     ),
                     validator: (v) {
-                      if (v == null || v.trim().isEmpty) return 'Enter your email';
+                      if (v == null || v.trim().isEmpty)
+                        return 'Enter your email';
                       return null;
                     },
                   ),
@@ -174,19 +177,21 @@ class _SignInPageState extends State<SignInPage> {
                   const SizedBox(height: 24),
                   FilledButton(
                     onPressed: _isLoading ? null : _signInWithEmail,
-                    child: _isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Text(_isSignUp ? 'Create account' : 'Sign in'),
+                    child:
+                        _isLoading
+                            ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                            : Text(_isSignUp ? 'Create account' : 'Sign in'),
                   ),
                   const SizedBox(height: 12),
                   TextButton(
-                    onPressed: _isLoading
-                        ? null
-                        : () => setState(() {
+                    onPressed:
+                        _isLoading
+                            ? null
+                            : () => setState(() {
                               _isSignUp = !_isSignUp;
                               _errorMessage = null;
                             }),
@@ -199,7 +204,9 @@ class _SignInPageState extends State<SignInPage> {
                   const SizedBox(height: 24),
                   Row(
                     children: [
-                      Expanded(child: Divider(color: Theme.of(context).dividerColor)),
+                      Expanded(
+                        child: Divider(color: Theme.of(context).dividerColor),
+                      ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Text(
@@ -207,7 +214,9 @@ class _SignInPageState extends State<SignInPage> {
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ),
-                      Expanded(child: Divider(color: Theme.of(context).dividerColor)),
+                      Expanded(
+                        child: Divider(color: Theme.of(context).dividerColor),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 24),
