@@ -105,6 +105,7 @@ async function transcribeRecordingBusiness(data, ctx) {
 
     const config = {
       languageCode: "en-US",
+      alternativeLanguageCodes: ["es-ES", "de-DE", "ru-RU"],
       enableAutomaticPunctuation: true,
       model: "default",
     };
@@ -124,6 +125,16 @@ async function transcribeRecordingBusiness(data, ctx) {
     const audio = { uri: audioUri };
 
     let transcriptText = "";
+    let detectedLanguage = null;
+
+    const processResults = (results) => {
+      const text = (results || [])
+        .map((r) => (r.alternatives?.[0]?.transcript ?? ""))
+        .filter(Boolean)
+        .join("\n");
+      const lang = (results || []).find((r) => r.languageCode)?.languageCode ?? config.languageCode;
+      return { text, languageCode: lang };
+    };
 
     if (isLongFile) {
       const [operation] = await speechClient.longRunningRecognize({
@@ -131,19 +142,17 @@ async function transcribeRecordingBusiness(data, ctx) {
         audio,
       });
       const [response] = await operation.promise();
-      transcriptText = (response.results || [])
-        .map((r) => (r.alternatives?.[0]?.transcript ?? ""))
-        .filter(Boolean)
-        .join("\n");
+      const processed = processResults(response.results);
+      transcriptText = processed.text;
+      detectedLanguage = processed.languageCode;
     } else {
       const [response] = await speechClient.recognize({
         config,
         audio,
       });
-      transcriptText = (response.results || [])
-        .map((r) => (r.alternatives?.[0]?.transcript ?? ""))
-        .filter(Boolean)
-        .join("\n");
+      const processed = processResults(response.results);
+      transcriptText = processed.text;
+      detectedLanguage = processed.languageCode;
     }
 
     const textToSave = transcriptText.trim() || "(no speech detected)";
@@ -154,15 +163,19 @@ async function transcribeRecordingBusiness(data, ctx) {
     });
 
     const firestore = getFirestore();
+    const inputUpdate = {
+      status: "transcribed",
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (detectedLanguage) {
+      inputUpdate.languageCode = detectedLanguage;
+    }
     await firestore
       .collection("users")
       .doc(userId)
       .collection("inputs")
       .doc(parsedNoteUuid)
-      .set(
-        { status: "transcribed", updatedAt: FieldValue.serverTimestamp() },
-        { merge: true }
-      );
+      .set(inputUpdate, { merge: true });
 
     const llmKey = getGeminiApiKey();
     const llmModel = getGeminiModel().trim() || "gemini-2.5-flash";
@@ -207,17 +220,22 @@ async function transcribeRecordingBusiness(data, ctx) {
     }
 
     const planStatus = planHasActions ? "plan_created" : "no_plan_created";
+    const planUpdate = { status: planStatus, updatedAt: FieldValue.serverTimestamp() };
+    if (detectedLanguage) {
+      planUpdate.languageCode = detectedLanguage;
+    }
     await firestore
       .collection("users")
       .doc(userId)
       .collection("inputs")
       .doc(parsedNoteUuid)
-      .set(
-        { status: planStatus, updatedAt: FieldValue.serverTimestamp() },
-        { merge: true }
-      );
+      .set(planUpdate, { merge: true });
 
-    logger.log("transcribeRecording: raw_text saved", { rawTextPath, length: textToSave.length });
+    logger.log("transcribeRecording: raw_text saved", {
+      rawTextPath,
+      length: textToSave.length,
+      languageCode: detectedLanguage,
+    });
 
     return { ok: true, rawTextPath, planPath, transcriptLength: textToSave.length };
   } catch (err) {
