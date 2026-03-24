@@ -1,44 +1,42 @@
-"use strict";
-
-const path = require("path");
-const fs = require("fs");
-const os = require("os");
-const speech = require("@google-cloud/speech");
-
-const { HttpsError } = require("firebase-functions/v2/https");
-const { FieldValue } = require("firebase-admin/firestore");
-
-const {
+import path from "path";
+import fs from "fs";
+import os from "os";
+import speech from "@google-cloud/speech";
+import { HttpsError } from "firebase-functions/v2/https";
+import { FieldValue } from "firebase-admin/firestore";
+import type { Bucket } from "@google-cloud/storage";
+import type { Firestore } from "firebase-admin/firestore";
+import {
   INPUTS_SEGMENT,
   RAW_AUDIO_FILENAME,
   RAW_TEXT_FILENAME,
   PLAN_FILENAME,
   TEMP_TRANSCODE_PREFIX,
   NEEDS_CONVERSION,
-} = require("../shared/constants");
-const { buildAndSavePlanOnly } = require("../shared/plan");
-const { parseNotesAudioPath, convertToFlac } = require("../shared/transcription");
+} from "../shared/constants";
+import { buildAndSavePlanOnly } from "../shared/plan";
+import { parseNotesAudioPath, convertToFlac } from "../shared/transcription";
+import type {
+  TranscribeRecordingRequest,
+  TranscribeRecordingResponse,
+  StoredPlan,
+  InputDocUpdate,
+} from "../shared/types";
 
-/**
- * @typedef {import('../generated/api.types').components['schemas']['TranscribeRecordingRequest']} TranscribeRecordingRequest
- * @typedef {import('../generated/api.types').components['schemas']['TranscribeRecordingResponse']} TranscribeRecordingResponse
- */
+interface TranscribeRecordingContext {
+  authUid: string;
+  bucket: Bucket;
+  bucketName: string;
+  getGeminiApiKey: () => string;
+  getGeminiModel: () => string;
+  logger: { log: (msg: string, obj?: object) => void; error: (msg: string, obj?: object) => void; warn: (msg: string, obj?: object) => void };
+  getFirestore: () => Firestore;
+}
 
-/**
- * Transcribe audio in Storage, save transcript and plan.
- * @param {TranscribeRecordingRequest} data
- * @param {{
- *   authUid: string,
- *   bucket: import('@google-cloud/storage').Bucket,
- *   bucketName: string,
- *   getGeminiApiKey: () => string,
- *   getGeminiModel: () => string,
- *   logger: import('firebase-functions/logger'),
- *   getFirestore: () => import('firebase-admin/firestore').Firestore,
- * }} ctx
- * @returns {Promise<TranscribeRecordingResponse>}
- */
-async function transcribeRecordingBusiness(data, ctx) {
+export async function transcribeRecordingBusiness(
+  data: TranscribeRecordingRequest | undefined,
+  ctx: TranscribeRecordingContext
+): Promise<TranscribeRecordingResponse> {
   const { authUid, bucket, bucketName, getGeminiApiKey, getGeminiModel, logger, getFirestore } = ctx;
 
   const noteUuid = data?.noteUuid;
@@ -75,7 +73,7 @@ async function transcribeRecordingBusiness(data, ctx) {
   try {
     const [metadata] = await bucket.file(filePath).getMetadata();
     fileSize = Number(metadata?.size ?? 0);
-  } catch (err) {
+  } catch {
     throw new HttpsError("not-found", "Recording file not found in storage.");
   }
 
@@ -84,8 +82,8 @@ async function transcribeRecordingBusiness(data, ctx) {
   const ext = path.extname(filePath).toLowerCase();
   const needsConversion = NEEDS_CONVERSION.includes(ext);
   let audioUri = `gs://${bucketName}/${filePath}`;
-  let tempFlacPath = null;
-  let tempInputPath = null;
+  let tempFlacPath: string | null = null;
+  let tempInputPath: string | null = null;
 
   try {
     if (needsConversion) {
@@ -103,7 +101,15 @@ async function transcribeRecordingBusiness(data, ctx) {
     const speechClient = new speech.SpeechClient();
     const isLongFile = fileSize > 10 * 1024 * 1024;
 
-    const config = {
+    type SpeechEncoding = "FLAC" | "LINEAR16" | "MP3" | "WEBM_OPUS";
+    const config: {
+      languageCode: string;
+      alternativeLanguageCodes: string[];
+      enableAutomaticPunctuation: boolean;
+      model: string;
+      encoding?: SpeechEncoding;
+      sampleRateHertz?: number;
+    } = {
       languageCode: "en-US",
       alternativeLanguageCodes: ["es-ES", "de-DE", "ru-RU"],
       enableAutomaticPunctuation: true,
@@ -125,32 +131,27 @@ async function transcribeRecordingBusiness(data, ctx) {
     const audio = { uri: audioUri };
 
     let transcriptText = "";
-    let detectedLanguage = null;
+    let detectedLanguage: string | null = null;
 
-    const processResults = (results) => {
-      const text = (results || [])
-        .map((r) => (r.alternatives?.[0]?.transcript ?? ""))
+    const processResults = (results: unknown) => {
+      const arr = Array.isArray(results) ? results : [];
+      const text = arr
+        .map((r: { alternatives?: Array<{ transcript?: string | null }> }) => r.alternatives?.[0]?.transcript ?? "")
         .filter(Boolean)
         .join("\n");
-      const lang = (results || []).find((r) => r.languageCode)?.languageCode ?? config.languageCode;
+      const lang = arr.find((r: { languageCode?: string }) => r.languageCode)?.languageCode ?? config.languageCode;
       return { text, languageCode: lang };
     };
 
     if (isLongFile) {
-      const [operation] = await speechClient.longRunningRecognize({
-        config,
-        audio,
-      });
+      const [operation] = await speechClient.longRunningRecognize({ config, audio });
       const [response] = await operation.promise();
-      const processed = processResults(response.results);
+      const processed = processResults(response?.results ?? []);
       transcriptText = processed.text;
       detectedLanguage = processed.languageCode;
     } else {
-      const [response] = await speechClient.recognize({
-        config,
-        audio,
-      });
-      const processed = processResults(response.results);
+      const [response] = await speechClient.recognize({ config, audio });
+      const processed = processResults(response?.results ?? []);
       transcriptText = processed.text;
       detectedLanguage = processed.languageCode;
     }
@@ -163,13 +164,11 @@ async function transcribeRecordingBusiness(data, ctx) {
     });
 
     const firestore = getFirestore();
-    const inputUpdate = {
+    const inputUpdate: InputDocUpdate = {
       status: "transcribed",
       updatedAt: FieldValue.serverTimestamp(),
+      ...(detectedLanguage && { languageCode: detectedLanguage }),
     };
-    if (detectedLanguage) {
-      inputUpdate.languageCode = detectedLanguage;
-    }
     await firestore
       .collection("users")
       .doc(userId)
@@ -194,7 +193,7 @@ async function transcribeRecordingBusiness(data, ctx) {
         planPath = planRes.planPath;
         planHasActions = (planRes.actionsCount ?? 0) > 0;
       } else {
-        const fallbackPlan = {
+        const fallbackPlan: StoredPlan = {
           actions: [],
           empty_reason: "Processing skipped: missing GEMINI_API_KEY.",
           generated_at: new Date().toISOString(),
@@ -204,14 +203,15 @@ async function transcribeRecordingBusiness(data, ctx) {
         });
       }
     } catch (planErr) {
+      const err = planErr as Error;
       logger.error("transcribeRecording: plan processing failed", {
         userId,
         noteUuid: parsedNoteUuid,
-        error: planErr?.message,
+        error: err?.message,
       });
-      const failedPlan = {
+      const failedPlan: StoredPlan = {
         actions: [],
-        empty_reason: `Processing failed: ${planErr?.message || String(planErr)}`,
+        empty_reason: `Processing failed: ${err?.message || String(planErr)}`,
         generated_at: new Date().toISOString(),
       };
       await bucket.file(planPath).save(JSON.stringify(failedPlan, null, 2), {
@@ -220,10 +220,11 @@ async function transcribeRecordingBusiness(data, ctx) {
     }
 
     const planStatus = planHasActions ? "plan_created" : "no_plan_created";
-    const planUpdate = { status: planStatus, updatedAt: FieldValue.serverTimestamp() };
-    if (detectedLanguage) {
-      planUpdate.languageCode = detectedLanguage;
-    }
+    const planUpdate: InputDocUpdate = {
+      status: planStatus,
+      updatedAt: FieldValue.serverTimestamp(),
+      ...(detectedLanguage && { languageCode: detectedLanguage }),
+    };
     await firestore
       .collection("users")
       .doc(userId)
@@ -240,8 +241,9 @@ async function transcribeRecordingBusiness(data, ctx) {
     return { ok: true, rawTextPath, planPath, transcriptLength: textToSave.length };
   } catch (err) {
     if (err instanceof HttpsError) throw err;
-    logger.error("transcribeRecording: failed", { filePath, rawTextPath, error: err.message });
-    throw new HttpsError("internal", err.message || "Transcription failed.");
+    const e = err as Error;
+    logger.error("transcribeRecording: failed", { filePath, rawTextPath, error: e.message });
+    throw new HttpsError("internal", e.message || "Transcription failed.");
   } finally {
     if (tempFlacPath && fs.existsSync(tempFlacPath)) fs.unlinkSync(tempFlacPath);
     if (tempInputPath && fs.existsSync(tempInputPath)) fs.unlinkSync(tempInputPath);
@@ -250,13 +252,12 @@ async function transcribeRecordingBusiness(data, ctx) {
       try {
         await bucket.file(tempStoragePath).delete();
       } catch (e) {
+        const ex = e as Error;
         logger.warn("transcribeRecording: temp FLAC delete failed", {
           tempStoragePath,
-          error: e?.message,
+          error: ex?.message,
         });
       }
     }
   }
 }
-
-module.exports = { transcribeRecordingBusiness };

@@ -1,17 +1,22 @@
-"use strict";
+import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { defineSecret, defineString } from "firebase-functions/params";
+import { initializeApp } from "firebase-admin/app";
+import { getStorage } from "firebase-admin/storage";
+import { getFirestore } from "firebase-admin/firestore";
+import logger from "firebase-functions/logger";
 
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { defineSecret, defineString } = require("firebase-functions/params");
-const { initializeApp } = require("firebase-admin/app");
-const { getStorage } = require("firebase-admin/storage");
-const { getFirestore } = require("firebase-admin/firestore");
-const logger = require("firebase-functions/logger");
-
-const { transcribeRecordingBusiness } = require("./business/transcribeRecording");
-const { connectGoogleCalendarBusiness } = require("./business/connectGoogleCalendar");
-const { disconnectGoogleCalendarBusiness } = require("./business/disconnectGoogleCalendar");
-const { overwriteExecutionPlanBusiness } = require("./business/overwriteExecutionPlan");
-const { executeStoredPlanBusiness } = require("./business/executeStoredPlan");
+import { transcribeRecordingBusiness } from "./business/transcribeRecording";
+import { connectGoogleCalendarBusiness } from "./business/connectGoogleCalendar";
+import { disconnectGoogleCalendarBusiness } from "./business/disconnectGoogleCalendar";
+import { overwriteExecutionPlanBusiness } from "./business/overwriteExecutionPlan";
+import { executeStoredPlanBusiness } from "./business/executeStoredPlan";
+import type {
+  TranscribeRecordingRequest,
+  ConnectGoogleCalendarRequest,
+  DisconnectGoogleCalendarRequest,
+  OverwriteExecutionPlanRequest,
+  ExecuteStoredPlanRequest,
+} from "./shared/types";
 
 initializeApp();
 
@@ -20,7 +25,7 @@ const googleOAuthClientSecret = defineSecret("GOOGLE_OAUTH_CLIENT_SECRET");
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 const geminiModel = defineString("GEMINI_MODEL", { default: "gemini-2.5-flash" });
 
-exports.transcribeRecording = onCall(
+export const transcribeRecording = onCall(
   {
     secrets: [googleOAuthClientSecret, geminiApiKey],
     timeoutSeconds: 540,
@@ -32,10 +37,7 @@ exports.transcribeRecording = onCall(
     }
     const bucket = getStorage().bucket();
     return transcribeRecordingBusiness(
-      {
-        noteUuid: request.data?.noteUuid,
-        storagePath: request.data?.storagePath,
-      },
+      request.data as TranscribeRecordingRequest | undefined,
       {
         authUid: request.auth.uid,
         bucket,
@@ -49,7 +51,7 @@ exports.transcribeRecording = onCall(
   }
 );
 
-exports.connectGoogleCalendar = onCall(
+export const connectGoogleCalendar = onCall(
   {
     secrets: [googleOAuthClientSecret],
     timeoutSeconds: 60,
@@ -60,7 +62,7 @@ exports.connectGoogleCalendar = onCall(
       throw new HttpsError("unauthenticated", "Sign in required.");
     }
     return connectGoogleCalendarBusiness(
-      { serverAuthCode: request.data?.serverAuthCode },
+      request.data as Partial<ConnectGoogleCalendarRequest> | undefined,
       {
         uid: request.auth.uid,
         firestore: getFirestore(),
@@ -72,12 +74,12 @@ exports.connectGoogleCalendar = onCall(
   }
 );
 
-exports.disconnectGoogleCalendar = onCall(async (request) => {
+export const disconnectGoogleCalendar = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }
   return disconnectGoogleCalendarBusiness(
-    {},
+    request.data as DisconnectGoogleCalendarRequest | undefined,
     {
       uid: request.auth.uid,
       firestore: getFirestore(),
@@ -85,16 +87,13 @@ exports.disconnectGoogleCalendar = onCall(async (request) => {
   );
 });
 
-exports.overwriteExecutionPlan = onCall(async (request) => {
+export const overwriteExecutionPlan = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }
   const bucket = getStorage().bucket();
   return overwriteExecutionPlanBusiness(
-    {
-      inputUuid: request.data?.inputUuid,
-      plan: request.data?.plan,
-    },
+    request.data as Partial<OverwriteExecutionPlanRequest> & { plan?: unknown } | undefined,
     {
       uid: request.auth.uid,
       bucket,
@@ -103,7 +102,7 @@ exports.overwriteExecutionPlan = onCall(async (request) => {
   );
 });
 
-exports.executeStoredPlan = onCall(
+export const executeStoredPlan = onCall(
   {
     secrets: [googleOAuthClientSecret],
     timeoutSeconds: 120,
@@ -115,7 +114,7 @@ exports.executeStoredPlan = onCall(
     }
     const bucket = getStorage().bucket();
     return executeStoredPlanBusiness(
-      { inputUuid: request.data?.inputUuid },
+      request.data as Partial<ExecuteStoredPlanRequest> | undefined,
       {
         uid: request.auth.uid,
         bucket,

@@ -287,14 +287,51 @@ export interface components {
             /** Format: date-time */
             generated_at: string;
         };
-        PlanAction: {
-            /** @description create_note or create_calendar_event */
-            tool: string;
-            /** @default {} */
-            arguments: {
-                [key: string]: string;
-            };
+        PlanAction: components["schemas"]["CreateNotePlanAction"] | components["schemas"]["CreateCalendarEventPlanAction"];
+        CreateNotePlanAction: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            tool: "create_note";
+            arguments: components["schemas"]["CreateNoteArguments"];
         };
+        CreateCalendarEventPlanAction: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            tool: "create_calendar_event";
+            arguments: components["schemas"]["CreateCalendarEventArguments"];
+        };
+        CreateNoteArguments: {
+            /** @description Short title */
+            title?: string;
+            /** @description Note content */
+            text?: string;
+        };
+        CreateCalendarEventArguments: {
+            title?: string;
+            /** @default  */
+            description: string;
+            /**
+             * Format: date-time
+             * @description ISO-8601 datetime
+             */
+            start_time?: string;
+            /**
+             * Format: date-time
+             * @description ISO-8601 datetime
+             */
+            finish_time?: string;
+            /** @default local */
+            timezone: components["schemas"]["CalendarTimezoneEnum"];
+        };
+        /**
+         * @description Timezone for calendar events. Use "local" for user's local timezone.
+         * @enum {string}
+         */
+        CalendarTimezoneEnum: "local" | "UTC" | "America/New_York" | "America/Los_Angeles" | "America/Chicago" | "America/Denver" | "Europe/London" | "Europe/Paris" | "Europe/Berlin" | "Asia/Tokyo" | "Asia/Shanghai" | "Asia/Singapore" | "Australia/Sydney" | "Australia/Melbourne" | "Pacific/Auckland";
         ExecutionResult: {
             tool: string;
             ok: boolean;

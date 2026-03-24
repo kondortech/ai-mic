@@ -12,6 +12,51 @@ import '../l10n/app_localizations.dart';
 import '../models/recording.dart';
 import '../services/api_service.dart';
 
+/// Returns a valid CalendarTimezoneEnum value; defaults to "local" if invalid.
+String _validTimezone(String? raw) {
+  if (raw == null || raw.isEmpty) return 'local';
+  final valid = CalendarTimezoneEnum.values.any((e) => e.value == raw);
+  return valid ? raw : 'local';
+}
+
+/// Human-readable label for timezone enum value.
+String _timezoneLabel(String value) {
+  switch (value) {
+    case 'local':
+      return 'Local (device)';
+    case 'UTC':
+      return 'UTC';
+    case 'America/New_York':
+      return 'New York';
+    case 'America/Los_Angeles':
+      return 'Los Angeles';
+    case 'America/Chicago':
+      return 'Chicago';
+    case 'America/Denver':
+      return 'Denver';
+    case 'Europe/London':
+      return 'London';
+    case 'Europe/Paris':
+      return 'Paris';
+    case 'Europe/Berlin':
+      return 'Berlin';
+    case 'Asia/Tokyo':
+      return 'Tokyo';
+    case 'Asia/Shanghai':
+      return 'Shanghai';
+    case 'Asia/Singapore':
+      return 'Singapore';
+    case 'Australia/Sydney':
+      return 'Sydney';
+    case 'Australia/Melbourne':
+      return 'Melbourne';
+    case 'Pacific/Auckland':
+      return 'Auckland';
+    default:
+      return value;
+  }
+}
+
 /// Detail page for a single recording: name, timestamp, play/stop, status, transcription.
 class RecordingPage extends StatefulWidget {
   const RecordingPage({super.key, required this.recording});
@@ -199,10 +244,9 @@ class _RecordingPageState extends State<RecordingPage> {
                       : <String, dynamic>{};
               if ((actionMap['tool'] as String?) == 'create_calendar_event') {
                 final args = actionMap['arguments'] as Map<String, dynamic>;
-                final tz = args['timezone']?.toString().trim() ?? '';
-                if (tz.isEmpty) {
-                  args['timezone'] = 'local';
-                }
+                args['timezone'] = _validTimezone(
+                  args['timezone']?.toString().trim(),
+                );
               }
               parsedActions.add(actionMap);
             }
@@ -286,31 +330,16 @@ class _RecordingPageState extends State<RecordingPage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final actions =
-        _planActions
-            .map(
-              (a) => PlanAction(
-                tool: (a['tool'] as String?) ?? 'create_note',
-                arguments:
-                    (a['arguments'] as Map<String, dynamic>?)?.map(
-                      (k, v) => MapEntry(k, v?.toString() ?? ''),
-                    ) ??
-                    {},
-              ),
-            )
-            .toList();
-    final plan = ExecutionPlan(
-      actions: actions,
-      emptyReason:
-          actions.isEmpty ? (_planEmptyReason ?? 'No actions in plan.') : null,
-      generatedAt: DateTime.now(),
-    );
-
     setState(() => _executingPlan = true);
     try {
       await ApiService.instance.overwriteExecutionPlan(
         inputUuid: widget.recording.noteUuid,
-        plan: plan,
+        actions: _planActions,
+        emptyReason:
+            _planActions.isEmpty
+                ? (_planEmptyReason ?? 'No actions in plan.')
+                : null,
+        generatedAt: DateTime.now(),
       );
 
       final result = await ApiService.instance.executeStoredPlan(
@@ -1117,20 +1146,29 @@ class _CreateCalendarEventActionCard extends StatelessWidget {
                         onTap: () => onPickTimestamp('finish_time'),
                       ),
                       const SizedBox(height: 16),
-                      TextFormField(
-                        initialValue:
-                            arguments['timezone']
-                                        ?.toString()
-                                        .trim()
-                                        .isNotEmpty ==
-                                    true
-                                ? arguments['timezone']?.toString()
-                                : 'local',
-                        enabled: enabled,
+                      DropdownButtonFormField<String>(
+                        value: _validTimezone(
+                          arguments['timezone']?.toString().trim(),
+                        ),
+                        items:
+                            CalendarTimezoneEnum.values
+                                .map(
+                                  (e) => DropdownMenuItem<String>(
+                                    value: e.value,
+                                    child: Text(_timezoneLabel(e.value)),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged:
+                            enabled
+                                ? (value) {
+                                  if (value != null)
+                                    onArgChanged('timezone', value);
+                                }
+                                : null,
                         decoration: InputDecoration(
                           labelText: l10n.recordingTimezone,
                         ),
-                        onChanged: (value) => onArgChanged('timezone', value),
                       ),
                     ],
                   ),

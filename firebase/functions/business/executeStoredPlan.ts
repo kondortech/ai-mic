@@ -1,30 +1,29 @@
-"use strict";
+import { HttpsError } from "firebase-functions/v2/https";
+import { FieldValue } from "firebase-admin/firestore";
+import type { Bucket } from "@google-cloud/storage";
+import type { Firestore } from "firebase-admin/firestore";
 
-const { HttpsError } = require("firebase-functions/v2/https");
-const { FieldValue } = require("firebase-admin/firestore");
+import { loadPlanJson } from "../shared/plan";
+import { executePlanActions } from "../shared/calendar";
+import type {
+  ExecuteStoredPlanRequest,
+  ExecuteStoredPlanResponse,
+  InputDocUpdate,
+} from "../shared/types";
 
-const { loadPlanJson } = require("../shared/plan");
-const { executePlanActions } = require("../shared/calendar");
+interface ExecuteStoredPlanContext {
+  uid: string;
+  bucket: Bucket;
+  firestore: Firestore;
+  googleOAuthWebClientId: string;
+  googleOAuthClientSecret: string;
+  logger: { info: (msg: string, obj?: object) => void };
+}
 
-/**
- * @typedef {import('../generated/api.types').components['schemas']['ExecuteStoredPlanRequest']} ExecuteStoredPlanRequest
- * @typedef {import('../generated/api.types').components['schemas']['ExecuteStoredPlanResponse']} ExecuteStoredPlanResponse
- */
-
-/**
- * Load and execute the plan for an input.
- * @param {ExecuteStoredPlanRequest} data
- * @param {{
- *   uid: string,
- *   bucket: import('@google-cloud/storage').Bucket,
- *   firestore: import('firebase-admin/firestore').Firestore,
- *   googleOAuthWebClientId: string,
- *   googleOAuthClientSecret: string,
- *   logger: import('firebase-functions/logger'),
- * }} ctx
- * @returns {Promise<ExecuteStoredPlanResponse>}
- */
-async function executeStoredPlanBusiness(data, ctx) {
+export async function executeStoredPlanBusiness(
+  data: Partial<ExecuteStoredPlanRequest> | undefined,
+  ctx: ExecuteStoredPlanContext
+): Promise<ExecuteStoredPlanResponse> {
   const { uid, bucket, firestore, googleOAuthWebClientId, googleOAuthClientSecret, logger } = ctx;
 
   const inputUuid = String(data?.inputUuid || "").trim();
@@ -37,7 +36,8 @@ async function executeStoredPlanBusiness(data, ctx) {
     const loaded = await loadPlanJson({ bucket, uid, inputUuid });
     plan = loaded.plan;
   } catch (e) {
-    throw new HttpsError("failed-precondition", `Cannot read plan.json: ${e?.message || e}`);
+    const err = e as Error;
+    throw new HttpsError("failed-precondition", `Cannot read plan.json: ${err?.message || e}`);
   }
 
   logger.info("executeStoredPlan called", {
@@ -71,15 +71,16 @@ async function executeStoredPlanBusiness(data, ctx) {
     results,
   });
 
+  const inputUpdate: InputDocUpdate = {
+    status: "plan_executed",
+    updatedAt: FieldValue.serverTimestamp(),
+  };
   await firestore
     .collection("users")
     .doc(uid)
     .collection("inputs")
     .doc(inputUuid)
-    .set(
-      { status: "plan_executed", updatedAt: FieldValue.serverTimestamp() },
-      { merge: true }
-    );
+    .set(inputUpdate, { merge: true });
 
   return {
     ok: true,
@@ -87,5 +88,3 @@ async function executeStoredPlanBusiness(data, ctx) {
     results,
   };
 }
-
-module.exports = { executeStoredPlanBusiness };

@@ -64,6 +64,9 @@ dist/
 build/
 out/
 
+# Firebase Functions TypeScript build output
+firebase/functions/lib/
+
 # --- Python (if any scripts/tools) ---
 __pycache__/
 *.py[cod]

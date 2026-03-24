@@ -222,17 +222,83 @@ components:
           format: date-time
 
     PlanAction:
+      oneOf:
+        - $ref: '#/components/schemas/CreateNotePlanAction'
+        - $ref: '#/components/schemas/CreateCalendarEventPlanAction'
+      discriminator:
+        propertyName: tool
+        mapping:
+          create_note: '#/components/schemas/CreateNotePlanAction'
+          create_calendar_event: '#/components/schemas/CreateCalendarEventPlanAction'
+
+    CreateNotePlanAction:
       type: object
-      required: [tool]
+      required: [tool, arguments]
       properties:
         tool:
           type: string
-          description: create_note or create_calendar_event
+          enum: [create_note]
         arguments:
-          type: object
-          additionalProperties:
-            type: string
-          default: {}
+          $ref: '#/components/schemas/CreateNoteArguments'
+
+    CreateCalendarEventPlanAction:
+      type: object
+      required: [tool, arguments]
+      properties:
+        tool:
+          type: string
+          enum: [create_calendar_event]
+        arguments:
+          $ref: '#/components/schemas/CreateCalendarEventArguments'
+
+    CreateNoteArguments:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Short title
+        text:
+          type: string
+          description: Note content
+
+    CreateCalendarEventArguments:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+          default: ""
+        start_time:
+          type: string
+          format: date-time
+          description: ISO-8601 datetime
+        finish_time:
+          type: string
+          format: date-time
+          description: ISO-8601 datetime
+        timezone:
+          $ref: '#/components/schemas/CalendarTimezoneEnum'
+          default: "local"
+
+    CalendarTimezoneEnum:
+      type: string
+      description: Timezone for calendar events. Use "local" for user's local timezone.
+      enum:
+        - UTC
+        - America/New_York
+        - America/Los_Angeles
+        - America/Chicago
+        - America/Denver
+        - Europe/London
+        - Europe/Paris
+        - Europe/Berlin
+        - Asia/Tokyo
+        - Asia/Shanghai
+        - Asia/Singapore
+        - Australia/Sydney
+        - Australia/Melbourne
+        - Pacific/Auckland
 
     ExecutionResult:
       type: object

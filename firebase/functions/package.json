@@ -2,6 +2,7 @@
   "name": "functions",
   "description": "Cloud Functions for AI Mic",
   "scripts": {
+    "build": "tsc",
     "serve": "firebase emulators:start --only functions",
     "shell": "firebase functions:shell",
     "start": "npm run shell",
@@ -12,7 +13,7 @@
   "engines": {
     "node": "20"
   },
-  "main": "index.js",
+  "main": "lib/index.js",
   "dependencies": {
     "@genkit-ai/google-genai": "^1.30.1",
     "@google-cloud/speech": "^7.3.0",
@@ -24,7 +25,9 @@
     "genkit": "^1.30.1"
   },
   "devDependencies": {
-    "firebase-functions-test": "^3.2.0"
+    "@types/node": "^22.10.0",
+    "firebase-functions-test": "^3.2.0",
+    "typescript": "^5.7.0"
   },
   "private": true
 }

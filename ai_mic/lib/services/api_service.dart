@@ -5,22 +5,26 @@ import 'package:ai_mic_api/api.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-/// JSON-safe payload for [HttpsCallable.call]. OpenAPI `dart` generator's
-/// [OverwriteExecutionPlanRequest.toJson] embeds nested objects instead of maps.
-Map<String, dynamic> _overwriteExecutionPlanRequestForCallable(
-  OverwriteExecutionPlanRequest req,
-) {
+/// Builds the overwrite plan payload. Each action has [tool] and [arguments].
+/// [arguments] values are normalized to strings for the backend (CreateNoteArguments
+/// or CreateCalendarEventArguments per tool).
+Map<String, dynamic> _planPayloadForCallable({
+  required List<Map<String, dynamic>> actions,
+  required String? emptyReason,
+  required DateTime generatedAt,
+}) {
   return {
-    'inputUuid': req.inputUuid,
-    'plan': _executionPlanForCallable(req.plan),
-  };
-}
-
-Map<String, dynamic> _executionPlanForCallable(ExecutionPlan plan) {
-  return {
-    'actions': plan.actions.map((a) => a.toJson()).toList(),
-    'empty_reason': plan.emptyReason,
-    'generated_at': plan.generatedAt.toUtc().toIso8601String(),
+    'actions':
+        actions.map((a) {
+          final tool = (a['tool'] as String?)?.trim() ?? 'create_note';
+          final args = a['arguments'] as Map<String, dynamic>? ?? {};
+          return {
+            'tool': tool,
+            'arguments': args.map((k, v) => MapEntry(k, v?.toString() ?? '')),
+          };
+        }).toList(),
+    'empty_reason': emptyReason,
+    'generated_at': generatedAt.toUtc().toIso8601String(),
   };
 }
 
@@ -55,15 +59,26 @@ class ApiService {
   }
 
   /// Overwrite and save an execution plan for an input.
+  /// [actions] each have [tool] ('create_note' | 'create_calendar_event') and
+  /// [arguments] (CreateNoteArguments or CreateCalendarEventArguments fields).
   Future<void> overwriteExecutionPlan({
     required String inputUuid,
-    required ExecutionPlan plan,
+    required List<Map<String, dynamic>> actions,
+    required String? emptyReason,
+    required DateTime generatedAt,
   }) async {
     _requireAuth();
-    final req = OverwriteExecutionPlanRequest(inputUuid: inputUuid, plan: plan);
+    final payload = {
+      'inputUuid': inputUuid,
+      'plan': _planPayloadForCallable(
+        actions: actions,
+        emptyReason: emptyReason,
+        generatedAt: generatedAt,
+      ),
+    };
     await FirebaseFunctions.instance
         .httpsCallable('overwriteExecutionPlan')
-        .call(_overwriteExecutionPlanRequestForCallable(req));
+        .call(payload);
   }
 
   /// Execute the stored plan for an input.
